@@ -1,0 +1,12 @@
+*.olean
+/_target
+/leanpkg.path
+*.swp
+src/all.lean
+decls.pickle
+.python-version
+print/
+web/
+decls.yaml
+src/list_decls.lean
+src/.noisy_files
