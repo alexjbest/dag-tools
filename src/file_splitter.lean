@@ -137,7 +137,7 @@ do
     let ls := l.split (λ c, c.is_whitespace),
     if ls.head = "import" then
       do a ← get_imports_aux f tt,
-        return (name.from_string ls.tail.head :: a)
+        return ((ls.tail.filter (≠ "")).map name.from_string ++ a) -- space separated lists on imports (in core)
     else
       if b then
         return []
@@ -215,6 +215,12 @@ meta def all_paths {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop
 -- #eval all_paths ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5), (5,6),(5,8),(8,7),(8,6), (5,19),(19,7), (6,7)]) 1 7
 
 
+run_cmd (do
+  e ← get_env,
+  G ← unsafe_run_io $ get_import_dag e `algebra.group_power.lemmas,
+  trace (all_paths G `data.int.cast `data.equiv.basic),
+  skip)
+-- #exit
 run_cmd (do
   e ← get_env,
   -- d← get_decl `vector.to_list_append,
