@@ -5,6 +5,7 @@ import tactic
 import number_theory.quadratic_reciprocity
 import data.list.lex
 
+local attribute [-instance] string_to_name
 open tactic declaration environment io io.fs (put_str_ln close)
 
 
@@ -118,7 +119,9 @@ meta def mk_file_dep_counts_basic (env : environment) (fname : name) : rb_counte
 let G := mk_file_dag env fname,
     Gr := G.reachable_table in
 Gr.fold (rb_counter.mk _) (λ k d o, k.deps.foldl
-  (λ o2 dep, if env.is_in_mathlib dep then o2.incr_by (file_name $ env.decl_olean dep) d.size else o2) o)
+  (λ o2 dep, if env.is_in_mathlib dep then
+      o2.incr_by (file_to_import env.get_mathlib_dir $ file_name $ env.decl_olean dep) d.size
+    else o2) o)
 
 
 meta def io.handle.get_line_as_string (f : handle) : io string :=
@@ -183,10 +186,17 @@ open native
 meta def dfs_all_paths {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)] [decidable_eq T]
   (d : dag T) (tgt : T) : T → rb_lmap T (list T) → rb_lmap T (list T)
 | v paths :=
-    (d.find v).foldl (λ opa de,
-    let npa :=
-      if paths.contains de then opa else dfs_all_paths de opa in
-        rb_map.insert npa v $ (npa.find de).map ((::) v)) paths
+  if paths.contains v then paths else
+    let npaths := (d.find v).foldl (λ opaths de, dfs_all_paths de opaths) paths in
+    rb_map.insert npaths v $ (d.find v).foldl (λ acc de,
+      let dep_paths := (npaths.find de) in
+      acc ++ dep_paths.map ((::) v)) []
+    -- (d.find v).foldl (λ opaths de, rb_map.insert opaths v _) npaths
+    -- rb_map.insert npaths v $ (npaths.find de).map ((::) v) _
+    -- (d.find v).foldl (λ opa de,
+    -- let npa :=
+    --   if paths.contains de then opa else dfs_all_paths de opa in
+    --     rb_map.insert npa v $ (npa.find de).map ((::) v)) paths
       -- else
       --   (dfs_all_paths de opa).map (λ p, v :: p)) paths
   -- let a := ((d.find v).foldl
@@ -202,19 +212,29 @@ meta def all_paths {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop
 (d : dag T) (src tgt : T) :
   list (list T) :=
 (dfs_all_paths d tgt src $ (mk_rb_map).insert tgt [[tgt]]).find src
-#eval all_paths ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5), (5,6),(5,8),(8,7),(8,6), (5,19),(19,7), (6,7)]) 1 7
+-- #eval all_paths ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5), (5,6),(5,8),(8,7),(8,6), (5,19),(19,7), (6,7)]) 1 7
 
 
 run_cmd (do
   e ← get_env,
   -- d← get_decl `vector.to_list_append,
-  a ←  unsafe_run_io $ get_import_dag e $ file_to_import e.get_mathlib_dir (file_name (e.decl_olean `zmod.quadratic_reciprocity)),
+  -- a ←  unsafe_run_io $ get_import_dag e $ file_to_import e.get_mathlib_dir (file_name (e.decl_olean `zmod.quadratic_reciprocity)),
   -- trace a,
-  trace (all_paths a `algebra.algebra.basic `tactic.abel),
-  trace (all_paths a `number_theory.quadratic_reciprocity `category_theory.whiskering),
+  -- trace (all_paths a `algebra.algebra.basic `tactic.abel),
+  -- trace (all_paths a `number_theory.quadratic_reciprocity `category_theory.whiskering),
   -- trace a.reachable_table ,
   -- trace $ import_to_file e.get_mathlib_dir $ file_to_import e.get_mathlib_dir$file_name (e.decl_olean `zmod.quadratic_reciprocity),
-  -- trace $ unsafe_run_io $ mk_file_dep_counts e $ file_to_import e.get_mathlib_dir (file_name (e.decl_olean `zmod.quadratic_reciprocity)),
+  G ← unsafe_run_io $ get_import_dag e `data.int.basic,
+  G.mfold () (λ na de _, do
+  b ←  unsafe_run_io $ mk_file_dep_counts e na,
+  if 0 ∈ b.to_list.map (prod.snd) then
+  trace $ na.to_string ++ to_string b.to_list
+  else
+  skip
+  ),
+  -- b ←  unsafe_run_io $ mk_file_dep_counts e $ `algebra.algebra.basic,
+  -- b ←  unsafe_run_io $ mk_file_dep_counts e $ file_to_import e.get_mathlib_dir (file_name (e.decl_olean `zmod.quadratic_reciprocity)),
+  -- trace (list.qsort (λ q w : name × ℕ, w.snd < q.snd) b.to_list),
   -- trace $ mk_data e d,
   skip
 )
@@ -229,6 +249,7 @@ run_cmd (do
   -- trace ((import_to_file e.get_mathlib_dir b)),
   -- trace (file_to_import e.get_mathlib_dir (import_to_file e.get_mathlib_dir b))
 )
+
 
 -- meta def main : tactic unit :=
 -- do curr_env ← get_env,
