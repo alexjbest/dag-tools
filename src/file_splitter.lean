@@ -20,10 +20,12 @@ open tactic declaration environment io io.fs (put_str_ln close)
 def import_to_file (pre : string) (im : name) : string :=
 pre ++ im.to_string_with_sep "/" ++ ".lean"-- TODO windows lol
 
-/-- pre should have a slash at the end -/
-def file_to_import (pre : string) (file : string) : name :=
-name.from_components
-((((string.get_rest file pre).get_or_else "Hello, I'm trapped in an error string, please let me out").split_on '.').head.split_on '/')
+section
+open name
+def name.remove_default : name → name
+| (mk_string "default" p) := p
+| p  := p
+end
 
 /-- A hackish way to get the `src` directory of any project.
   Requires as argument any declaration name `n` in that project, and `k`, the number of characters
@@ -39,6 +41,10 @@ meta def environment.get_project_dir (e : environment) (n : name) (k : ℕ) : st
 meta def environment.get_mathlib_dir (e : environment) : string :=
 e.get_project_dir `mathlib_dir_locator 23
 
+/-- A hackish way to get the `src` directory of core. -/
+meta def environment.get_core_dir (e : environment) : string :=
+e.get_project_dir `nat 14
+
 /-- Checks whether a declaration with the given name is declared in mathlib.
 If you want to run this tactic many times, you should use `environment.is_prefix_of_file` instead,
 since it is expensive to execute `get_mathlib_dir` many times. -/
@@ -48,7 +54,7 @@ e.is_prefix_of_file e.get_mathlib_dir n
 
 structure import_data : Type :=
 (decl_name : name)
-(file_name : string)
+(file_name : name)
 (file_pos : option pos)
 (deps : list name)
 
@@ -78,26 +84,36 @@ meta instance : has_to_format import_data :=
         -- ++ " : " ++ to_fmt (i.deps)
         ⟩
 
+meta instance : has_to_string import_data :=
+⟨λ b, to_string $ to_fmt b⟩
+
 meta instance : has_to_tactic_format import_data :=
 ⟨λ b, return $ to_fmt b⟩
 
-meta def mk_data (env : environment) (decl : declaration) : import_data :=
+/-- Given a declaration return a structure of its name, position, list of dependent decl names and
+    filename. -/
+meta def mk_data (env : environment) (file_to_import : string → name) (decl : declaration) : import_data :=
 let na := decl.to_name,
     po := env.decl_pos na,
     deps := (list_items decl.type ++ list_items decl.value).erase_dup,
-    fname := file_name (env.decl_olean na) in
+    fname := file_to_import $ file_name $ env.decl_olean na in
   { decl_name := na,
     file_name := fname,
     file_pos := po,
     deps := deps, }
 
-meta def mk_file_data (env : environment) (fname : name) : list import_data :=
+/-- Creates an import data tuple for every declaration in  file `fname`. -/
+meta def mk_file_data (env : environment) (fname : name) (file_to_import : string → name) :
+  list import_data :=
+let fn_string := import_to_file env.get_mathlib_dir fname in
 (env.get_decls.filter
-  (λ d : declaration, env.decl_olean d.to_name = import_to_file env.get_mathlib_dir fname)).map
-    (mk_data env)
+  (λ d : declaration, env.decl_olean d.to_name = fn_string)).map
+    (mk_data env file_to_import)
 
-meta def mk_file_dag (env : environment) (fname : name) : dag import_data :=
-let fdata := mk_file_data env fname,
+/-- Creates a dag of input data. -/
+meta def mk_file_dag (env : environment) (fname : name) (file_to_import : string → name) :
+  dag import_data :=
+let fdata := mk_file_data env fname file_to_import,
     decl_names := fdata.map import_data.decl_name in
 fdata.foldl (λ G id,
   id.deps.foldl (λ G2 dep, ((fdata.find (λ el : import_data, el.decl_name = dep)).map -- todo maybe replace with an rb_map
@@ -119,67 +135,6 @@ rb_map.mk _ _
 meta instance [has_to_format T] : has_to_format (rb_counter T) := rb_map.has_to_format
 end rb_counter
 end rb_counter
-open tactic
-
-meta def mk_file_dep_counts_basic (env : environment) (fname : name) : rb_counter name :=
-let G := mk_file_dag env fname,
-    Gr := G.reachable_table in
-(Gr.fold (rb_counter.mk _) (λ k d o, k.deps.foldl
-  (λ o2 dep, if env.is_in_mathlib dep then
-      o2.incr_by (file_to_import env.get_mathlib_dir $ file_name $ env.decl_olean dep) d.size
-    else o2) o)).erase fname
-
-
-meta def io.handle.get_line_as_string (f : handle) : io string :=
-do g ← fs.get_line f, return g.to_list.as_string
-
-meta def get_imports_aux : handle → bool → io (list name)
-| f b :=
-do
-  eo ← io.fs.is_eof f,
-  if eo then return []
-  else do
-    l ← f.get_line_as_string,
-    let ls := l.split (λ c, c.is_whitespace),
-    -- if ls.tail.head = "graph." hen return [] else -- stupid hack around reserved notation
-    (if ls.head = "import" then
-      do a ← get_imports_aux f tt,
-        return (((ls.tail.split_on_p (λ s, "--".is_prefix_of s)).head.filter (≠ "")).map name.from_string ++ a) -- space separated lists on imports (in core)
-    else
-      if (b ∧ l ≠ "\n") ∨ "/-!".is_prefix_of l then
-        return []
-      else
-        get_imports_aux f b)
-
-meta def get_imports (e : environment) (file : name) : io (list name) :=
-do
-  f ← mk_file_handle (import_to_file e.get_mathlib_dir file) io.mode.read <|>
-      mk_file_handle (import_to_file e.get_mathlib_dir $ file.append `default) io.mode.read <|>
-      mk_file_handle (import_to_file (e.get_project_dir `nat 14) file) io.mode.read <|>
-      mk_file_handle (import_to_file (e.get_project_dir `nat 14) $ file.append `default) io.mode.read,
-  l ← get_imports_aux f ff,
-  fs.close f,
-  return l
-
-meta def get_dag_aux (e : environment) : name → dag name → io (dag name)
-| n d := do
-if d.contains n then return d else do
-a ← (get_imports e `data.int.basic),
-  l ← get_imports e n,
-  l.mfoldl (λ od im, do
-    G ← get_dag_aux im od,
-    return $ G.insert_edge n im) d
-
-meta def get_import_dag (e : environment) (file : name) : io (dag name) :=
-get_dag_aux e file (dag.mk _)
-
-open native
-meta def mk_file_dep_counts (env : environment) (fname : name) (Gr : rb_map name (rb_set name)) : io (rb_counter name) :=
-do let dc := mk_file_dep_counts_basic env fname,
-  -- io.put_str (to_fmt dc).to_string, -- another beautiful hack
-  -- G ← get_import_dag env fname,
-  -- let Gr := G.reachable_table,
-  return $ (Gr.fold dc (λ na ln odc, ln.fold odc (λ de odc', odc'.incr_by de ((dc.find na).get_or_else 0)))).erase fname
 
 open native
 
@@ -229,38 +184,195 @@ meta def all_paths {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop
 meta def dag.count_descendents {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)] [decidable_eq T]
   (d : dag T) (start : list T) : ℕ :=
 d.dfs (λ _, nat.succ) 0 start
+
+meta def dag.count_all_descendents {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)] [decidable_eq T]
+  (d : dag T) (start : list T := d.vertices) : rb_counter T :=
+d.dfs (λ v acc, acc.insert v $ 1 + ((d.find v).map $ λ de, acc.zfind de).sum) mk_rb_map start
 -- #eval count_descendents (((dag.mk ℕ).insert_vertex 3).insert_edges [(1, 5), (4,5), (2,5)]) ([1,4,3])
-#check dag.count_descendents
+
+open tactic
+
+open native
+meta def mk_file_dep_counts_basic (env : environment) (fname : name) (file_to_import : string → name) :
+  rb_counter name :=
+let G := mk_file_dag env fname file_to_import,
+    Gr := G.count_all_descendents in
+(Gr.fold (rb_counter.mk _) (λ k d o, k.deps.foldl
+  (λ o2 dep, if env.is_in_mathlib dep then
+      o2.incr_by (file_to_import $ file_name $ env.decl_olean dep) d
+    else o2) o)).erase fname
+
+meta def io.handle.get_line_as_string (f : handle) : io string :=
+do g ← fs.get_line f, return g.to_list.as_string
+
+meta def get_imports_aux : handle → bool → io (list name)
+| f b :=
+do
+  eo ← io.fs.is_eof f,
+  if eo then return []
+  else do
+    l ← f.get_line_as_string,
+    let ls := l.split (λ c, c.is_whitespace),
+    -- if ls.tail.head = "graph." hen return [] else -- stupid hack around reserved notation
+    (if ls.head = "import" then
+      do a ← get_imports_aux f tt,
+        return ((((ls.tail.split_on_p (λ s, "--".is_prefix_of s)).head.filter (≠ "")).map
+          name.from_string).map name.remove_default ++ a) -- space separated lists on imports (in core)
+    else
+      -- if we are either
+      if (b ∧ l ≠ "\n") ∨ "/-!".is_prefix_of l then
+        return []
+      else
+        get_imports_aux f b)
+
+meta def get_imports (e : environment) (file : name) : io (list name) :=
+do
+  f ← mk_file_handle (import_to_file e.get_mathlib_dir file) io.mode.read <|>
+      mk_file_handle (import_to_file e.get_mathlib_dir $ file.append `default) io.mode.read <|>
+      mk_file_handle (import_to_file (e.get_core_dir) file) io.mode.read <|>
+      mk_file_handle (import_to_file (e.get_core_dir) $ file.append `default) io.mode.read,
+  l ← get_imports_aux f ff,
+  fs.close f,
+  return l
+
+meta def get_dag_aux (e : environment) : name → dag name → io (dag name)
+| n d := do
+if d.contains n then return d else do
+  l ← get_imports e n,
+  l.mfoldl (λ od im, do
+    G ← get_dag_aux im od,
+    return $ G.insert_edge n im) d
+
+meta def get_import_dag (e : environment) (file : name) : io (dag name) :=
+get_dag_aux e file (dag.mk _)
+
+open native
+/-- pre should have a slash at the end -/
+meta def mk_file_to_import (e : environment) : string → name :=
+let mathlib_pre := e.get_mathlib_dir,
+    core_pre := e.get_core_dir in
+λ file,
+let rest := (file.get_rest mathlib_pre).get_or_else $
+            (file.get_rest core_pre).get_or_else
+           "Hello, I'm trapped in an error string, please let me out" in
+  (name.from_components ((rest.popn_back 5).split_on '/')).remove_default
+
+meta def mk_file_dep_counts (env : environment) (fname : name) (Gr : rb_map name (rb_set name)) :
+  rb_counter name :=
+  let file_to_import := mk_file_to_import env,
+      dc := mk_file_dep_counts_basic env fname file_to_import in
+  -- io.put_str (to_fmt dc).to_string, -- another beautiful hack
+  -- G ← get_import_dag env fname,
+  (dc.fold dc
+    (λ nam co acc, (Gr.ifind nam).fold acc (λ de acc', acc'.incr_by de $ dc.zfind nam))).erase fname
+  -- return $ (Gr.fold dc (λ na ln odc, ln.fold odc (λ de odc', odc'.incr_by de ((dc.find na).get_or_else 0)))).erase fname
+
 -- run_cmd (do
 --   e ← get_env,
 --   G ← unsafe_run_io $ get_import_dag e `algebra.group_power.lemmas,
 --   trace (all_paths G `data.int.cast `data.equiv.basic),
   -- skip)
 meta def get_minimal_imports (e : environment) (n : name) (G : dag name) (Gr := G.reachable_table) :
-  io (rb_set name) := do
+  rb_set name :=
   -- let n := `ring_theory.discrete_valuation_ring,
   -- let n := `algebra.lie.classical,
-  b ← mk_file_dep_counts e n Gr,
+  let b := mk_file_dep_counts e n Gr in
+      G.minimal_vertices $ b.keys.filter (λ k, b.find k ≠ some 0)
 
-  let mins := G.minimal_vertices $ b.keys.filter (λ k, b.find k ≠ some 0),
-  return mins
+section ignore
+  def good_files : list name :=
+  [
+  `algebra.big_operators.enat,
+  `algebra.big_operators.fin,
+  `algebra.big_operators.finsupp,
+  `algebra.big_operators.option,
+  `algebra.char_p.quotient,
+  `algebra.group_power.identities,
+  `algebra.hierarchy_design,
+  `algebra.order.pointwise,
+  `algebraic_geometry.prime_spectrum.noetherian,
+  `analysis.analytic.radius_liminf,
+  `analysis.convex.complex,
+  `analysis.hofer,
+  `analysis.inner_product_space.conformal_linear_map,
+  `category_theory.limits.constructions.binary_products,
+  `category_theory.limits.constructions.weakly_initial,
+  `category_theory.limits.shapes.concrete_category,
+  `category_theory.linear,
+  `category_theory.preadditive,
+  `category_theory.products.bifunctor,
+  `combinatorics.choose.bounds,
+  `combinatorics.derangements.exponential,
+  `data.buffer.parser,
+  `data.fintype.fin,
+  `data.int.absolute_value,
+  `data.int.nat_prime,
+  `data.list.prod_monoid,
+  `data.nat.choose.vandermonde,
+  `data.polynomial.cardinal,
+  `data.real.pi.leibniz,
+  `data.real.pointwise,
+  `data.vector,
+  `dynamics.fixed_points.topology,
+  `field_theory.mv_polynomial,
+  `linear_algebra,
+  `linear_algebra.affine_space.basic,
+  `linear_algebra.charpoly.to_matrix,
+  `measure_theory.integral.divergence_theorem,
+  `number_theory.basic,
+  `number_theory.lucas_primality,
+  `number_theory.sum_two_squares,
+  `probability_theory.notation,
+  `ring_theory.fintype,
+  `system.io,
+  `system.io_interface,
+  `tactic.by_contra,
+  `tactic.converter.apply_congr,
+  `tactic.dec_trivial,
+  `tactic.lean_core_docs,
+  `tactic.linarith.lemmas,
+  `tactic.noncomm_ring,
+  `tactic.norm_swap,
+  `tactic.nth_rewrite,
+  `tactic.obviously,
+  `tactic.rewrite_search.frontend,
+  `tactic.show_term,
+  `tactic.simp_rw,
+  `tactic.simpa,
+  `topology.category.CompHaus,
+  `topology.category.Profinite,
+  `topology.category.Top.epi_mono,
+  `topology.uniform_space.complete_separated]
+end ignore
 
-run_cmd (do
-  e ← get_env,
-  let nam:=`number_theory.lucas_primality,
-  -- f ← unsafe_run_io $ mk_file_handle (import_to_file e.get_mathlib_dir nam) io.mode.read,
-  G ← unsafe_run_io $ get_import_dag e nam,
-  i ← unsafe_run_io $ get_minimal_imports e nam G,
-  trace $ "\n".intercalate $ i.keys.map (λ n, "import "++to_string n),
-  trace $ G.count_descendents (i.keys : list name),
-  i2 ← unsafe_run_io $ get_imports e nam,
-  trace i2,
-  tactic.trace $ G.count_descendents (i2 : list name)
+meta def optimize_imports (e : environment) (nam : name) (G : dag name) (Gr := G.reachable_table) :
+  string × ℕ × ℕ :=
+  -- G ← get_import_dag e nam,
+  let i := get_minimal_imports e nam G Gr,
+      i2 := G.find nam in
+  ("\n".intercalate $ i.keys.map (λ n, "import "++to_string n),
+    G.count_descendents (i.keys : list name),
+    -- i2 ++
+    G.count_descendents (i2 : list name))
+
+
+set_option profiler true
+run_cmd unsafe_run_io (do
+  e ← run_tactic get_env,
+  G ← get_import_dag e `all,
+  -- let file_to_import := mk_file_to_import e,
+  -- let G' := mk_file_dag e `algebra.group_with_zero.basic file_to_import,
+  -- io.print G'.keys,
+  -- io.print G.keys
+  let Gr := G.reachable_table,
+  print Gr.keys.length
+  -- let T := (good_files.take 3).map (λ nam, optimize_imports e nam G Gr),
+  -- print T
+)
   -- trace a
   -- let b := a.head,
   -- trace ((import_to_file e.get_mathlib_dir b)),
   -- trace (file_to_import e.get_mathlib_dir (import_to_file e.get_mathlib_dir b))
-)
 
   -- io.print $ b.to_list.qsort (λ q w : name × ℕ, w.snd > q.snd),
   -- guardb (0 ∈ b.to_list.map (prod.snd)),
@@ -275,7 +387,6 @@ run_cmd (do
   -- trace a,
   -- trace (all_paths a `algebra.algebra.basic `tactic.abel),
   -- trace (all_paths a `number_theory.quadratic_reciprocity `category_theory.whiskering),
-  -- trace a.reachable_table ,
   -- trace $ import_to_file e.get_mathlib_dir $ file_to_import e.get_mathlib_dir$file_name (e.decl_olean `zmod.quadratic_reciprocity),
   -- G ← unsafe_run_io $ get_import_dag e `data.int.basic,
   -- G.mfold () (λ na de _, do
