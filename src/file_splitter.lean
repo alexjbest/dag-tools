@@ -243,8 +243,8 @@ if d.contains n then return d else do
     G ← get_dag_aux im od,
     return $ G.insert_edge n im) d
 
-meta def get_import_dag (e : environment) (file : name) : io (dag name) :=
-get_dag_aux e file (dag.mk _)
+meta def get_import_dag (e : environment) (files : list name) : io (dag name) :=
+files.mfoldl (λ ol file, get_dag_aux e file ol) (dag.mk _)
 
 open native
 /-- pre should have a slash at the end -/
@@ -346,28 +346,44 @@ section ignore
 end ignore
 
 meta def optimize_imports (e : environment) (nam : name) (G : dag name) (Gr := G.reachable_table) :
-  string × ℕ × ℕ :=
-  -- G ← get_import_dag e nam,
+  name × list string × ℕ × ℕ :=
   let i := get_minimal_imports e nam G Gr,
       i2 := G.find nam in
-  ("\n".intercalate $ i.keys.map (λ n, "import "++to_string n),
+  (nam, (i.keys.map to_string).qsort (λ a b, a < b : string → string → bool),
     G.count_descendents (i.keys : list name),
     -- i2 ++
     G.count_descendents (i2 : list name))
 
+-- https://unix.stackexchange.com/questions/342516/sed-remove-all-matches-in-the-file-and-insert-some-lines-where-the-first-match
+-- Note:
+-- This clobbers import comments
+-- Mac should use gsed
+-- This pipes to stdout, use -i for in-place
+def output_to_sed (o : name × list string × ℕ × ℕ) : string :=
+let fn := o.1.to_string_with_sep "/",
+    imps := "\\\n".intercalate $ o.2.1.map (λ i, sformat!"import {i}") in
+"sed '/^import /{x;//!c\\" ++ sformat!"
+{imps}
+d}' src/{fn}.lean\n"
+
+-- #eval trace_val $ output_to_sed (`a.b.c, "import ok
+-- import hi", 0,0)
+-- #exit
 
 set_option profiler true
 run_cmd unsafe_run_io (do
   e ← run_tactic get_env,
-  G ← get_import_dag e `all,
+  let L := good_files.take 2,
+  G ← get_import_dag e L,
   -- let file_to_import := mk_file_to_import e,
   -- let G' := mk_file_dag e `algebra.group_with_zero.basic file_to_import,
   -- io.print G'.keys,
   -- io.print G.keys
   let Gr := G.reachable_table,
-  print Gr.keys.length
-  -- let T := (good_files.take 3).map (λ nam, optimize_imports e nam G Gr),
-  -- print T
+  -- print $ (Gr.ifind `n).to_list
+  let T := L.map (λ nam, optimize_imports e nam G Gr),
+  print T,
+  (T.map output_to_sed).mmap print
 )
   -- trace a
   -- let b := a.head,
@@ -441,26 +457,26 @@ run_cmd unsafe_run_io (do
 --         skip),
 --    unsafe_run_io (close h),
 --    skip
-open io io.fs native tactic
-meta def main : io unit :=
-do
-  e ← run_tactic get_env,
-  -- b ← mk_file_dep_counts e `data.int.basic,
-  G ← get_import_dag e `all,
-  io.print "running on:\n",
-  io.print (to_fmt G.keys),
-  G.keys.mmap' (λ na, do
-    b ← mk_file_dep_counts e na,
-    -- io.print "hi",
-    io.print ("\n" ++ na.to_string ++" >>> \n" ++ to_string (b.to_list.qsort (λ q w : name × ℕ, w.snd < q.snd)) ++ "\n"),
-    guardb (¬ 0 ∈ b.to_list.map (prod.snd)) <|> (do
-      io.print "##### some zeroes\n",
-      io.print "ok and nok imps\n",
-      let okimps := (G.find na).filter (λ de, ¬((de, 0) ∈ b.to_list)),
-      io.print okimps,
-      let nokimps := (G.find na).filter (λ de, ((de, 0) ∈ b.to_list)),
-      io.print nokimps,
-      io.print "\nall rems\n",
-      io.print $ G.vertices.filter (λ v, ¬ (v, 0) ∈ b.to_list)
-      ))
+-- open io io.fs native tactic
+-- meta def main : io unit :=
+-- do
+--   e ← run_tactic get_env,
+--   -- b ← mk_file_dep_counts e `data.int.basic,
+--   G ← get_import_dag e `all,
+--   io.print "running on:\n",
+--   io.print (to_fmt G.keys),
+--   G.keys.mmap' (λ na, do
+--     b ← mk_file_dep_counts e na,
+--     -- io.print "hi",
+--     io.print ("\n" ++ na.to_string ++" >>> \n" ++ to_string (b.to_list.qsort (λ q w : name × ℕ, w.snd < q.snd)) ++ "\n"),
+--     guardb (¬ 0 ∈ b.to_list.map (prod.snd)) <|> (do
+--       io.print "##### some zeroes\n",
+--       io.print "ok and nok imps\n",
+--       let okimps := (G.find na).filter (λ de, ¬((de, 0) ∈ b.to_list)),
+--       io.print okimps,
+--       let nokimps := (G.find na).filter (λ de, ((de, 0) ∈ b.to_list)),
+--       io.print nokimps,
+--       io.print "\nall rems\n",
+--       io.print $ G.vertices.filter (λ v, ¬ (v, 0) ∈ b.to_list)
+--       ))
 -- run_cmd unsafe_run_io main
