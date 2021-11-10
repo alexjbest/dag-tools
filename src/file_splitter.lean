@@ -316,7 +316,7 @@ do
   G.keys.mmap' (λ na, do
     b ← mk_file_dep_counts e na,
     -- io.print "hi",
-    io.print ("\n" ++ na.to_string ++" >>> \n" ++ to_string b.to_list ++ "\n"),
+    io.print ("\n" ++ na.to_string ++" >>> \n" ++ to_string (b.to_list.qsort (λ q w : name × ℕ, w.snd < q.snd)) ++ "\n"),
     guardb (¬ 0 ∈ b.to_list.map (prod.snd)) <|> (do
       io.print "##### some zeroes\n",
       io.print "ok and nok imps\n",
