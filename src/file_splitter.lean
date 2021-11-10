@@ -2,7 +2,14 @@ import dag
 import data.vector
 import crawler
 import tactic
+import data.int.basic
 import number_theory.quadratic_reciprocity
+import topology.algebra.module
+import topology.algebra.ordered.basic
+import ring_theory.discrete_valuation_ring
+import algebra.lie.classical
+import all
+import system.io
 import data.list.lex
 
 local attribute [-instance] string_to_name
@@ -75,14 +82,13 @@ meta instance : has_to_tactic_format import_data :=
 ⟨λ b, return $ to_fmt b⟩
 
 meta def mk_data (env : environment) (decl : declaration) : import_data :=
-let name := decl.to_name,
-    pos := (env.decl_pos name),
+let na := decl.to_name,
+    po := env.decl_pos na,
     deps := (list_items decl.type ++ list_items decl.value).erase_dup,
-    fname := file_name (env.decl_olean name) in
-  -- pos ← pos,
-  { decl_name := name,
+    fname := file_name (env.decl_olean na) in
+  { decl_name := na,
     file_name := fname,
-    file_pos := pos,
+    file_pos := po,
     deps := deps, }
 
 meta def mk_file_data (env : environment) (fname : name) : list import_data :=
@@ -135,28 +141,33 @@ do
   else do
     l ← f.get_line_as_string,
     let ls := l.split (λ c, c.is_whitespace),
-    if ls.head = "import" then
+    if ls.tail.head = "graph." then return [] else -- stupid hack around reserved notation
+    (if ls.head = "import" then
       do a ← get_imports_aux f tt,
-        return ((ls.tail.filter (≠ "")).map name.from_string ++ a) -- space separated lists on imports (in core)
+        return (((ls.tail.split_on ("--")).head.filter (≠ "")).map name.from_string ++ a) -- space separated lists on imports (in core)
     else
       if b then
         return []
       else
-        get_imports_aux f b
+        get_imports_aux f b)
 
 meta def get_imports (e : environment) (file : name) : io (list name) :=
 do
   f ← mk_file_handle (import_to_file e.get_mathlib_dir file) io.mode.read <|>
-                      mk_file_handle (import_to_file e.get_mathlib_dir $ file.append `default) io.mode.read <|>
-                      mk_file_handle (import_to_file (e.get_project_dir `nat 14) file) io.mode.read <|>
-                      mk_file_handle (import_to_file (e.get_project_dir `nat 14) $ file.append `default) io.mode.read,
-  get_imports_aux f ff
+      mk_file_handle (import_to_file e.get_mathlib_dir $ file.append `default) io.mode.read <|>
+      mk_file_handle (import_to_file (e.get_project_dir `nat 14) file) io.mode.read <|>
+      mk_file_handle (import_to_file (e.get_project_dir `nat 14) $ file.append `default) io.mode.read,
+  l ← get_imports_aux f ff,
+  fs.close f,
+  return l
 
 meta def get_dag_aux (e : environment) : name → dag name → io (dag name)
 | n d := do
+if d.contains n then return d else do
+a ← (get_imports e `data.int.basic),
   l ← get_imports e n,
   l.mfoldl (λ od im, do
-    G ← if od.contains im then return od else get_dag_aux im od,
+    G ← get_dag_aux im od,
     return $ G.insert_edge n im) d
 
 meta def get_import_dag (e : environment) (file : name) : io (dag name) :=
@@ -164,6 +175,7 @@ get_dag_aux e file (dag.mk _)
 
 meta def mk_file_dep_counts (env : environment) (fname : name) : io (rb_counter name) :=
 do let dc := mk_file_dep_counts_basic env fname,
+  -- io.put_str (to_fmt dc).to_string, -- another beautiful hack
   G ← get_import_dag env fname,
   let Gr := G.reachable_table,
   return $ Gr.fold dc (λ na ln odc, ln.fold odc (λ de odc', odc'.incr_by de ((dc.find na).get_or_else 0)))
@@ -215,14 +227,23 @@ meta def all_paths {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop
 -- #eval all_paths ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5), (5,6),(5,8),(8,7),(8,6), (5,19),(19,7), (6,7)]) 1 7
 
 
-run_cmd (do
+-- run_cmd (do
+--   e ← get_env,
+--   G ← unsafe_run_io $ get_import_dag e `algebra.group_power.lemmas,
+--   trace (all_paths G `data.int.cast `data.equiv.basic),
+  -- skip)
+meta def silly (n : name) : tactic unit := (do
   e ← get_env,
-  G ← unsafe_run_io $ get_import_dag e `algebra.group_power.lemmas,
-  trace (all_paths G `data.int.cast `data.equiv.basic),
-  skip)
--- #exit
-run_cmd (do
-  e ← get_env,
+  -- let n := `ring_theory.discrete_valuation_ring,
+  -- let n := `algebra.lie.classical,
+  b ← unsafe_run_io $ mk_file_dep_counts e n,
+  trace $ b.to_list.qsort (λ q w : name × ℕ, w.snd > q.snd),
+  guardb (0 ∈ b.to_list.map (prod.snd)),
+  G ← unsafe_run_io $ get_import_dag e n,
+  let okimps := (G.find n).filter (λ de, ¬((de, 0) ∈ b.to_list)),
+  trace okimps,
+  trace $ G.vertices.filter (λ v, ¬ (v, 0) ∈ b.to_list),
+  -- trace $ G.minimal_vertices (rb_set.of_list $ G.vertices.filter (λ v, ¬ (v, 0) ∈ b.to_list)),
   -- d← get_decl `vector.to_list_append,
   -- a ←  unsafe_run_io $ get_import_dag e $ file_to_import e.get_mathlib_dir (file_name (e.decl_olean `zmod.quadratic_reciprocity)),
   -- trace a,
@@ -230,14 +251,14 @@ run_cmd (do
   -- trace (all_paths a `number_theory.quadratic_reciprocity `category_theory.whiskering),
   -- trace a.reachable_table ,
   -- trace $ import_to_file e.get_mathlib_dir $ file_to_import e.get_mathlib_dir$file_name (e.decl_olean `zmod.quadratic_reciprocity),
-  G ← unsafe_run_io $ get_import_dag e `data.int.basic,
-  G.mfold () (λ na de _, do
-  b ←  unsafe_run_io $ mk_file_dep_counts e na,
-  if 0 ∈ b.to_list.map (prod.snd) then
-  trace $ na.to_string ++ to_string b.to_list
-  else
-  skip
-  ),
+  -- G ← unsafe_run_io $ get_import_dag e `data.int.basic,
+  -- G.mfold () (λ na de _, do
+  -- b ←  unsafe_run_io $ mk_file_dep_counts e na,
+  -- if 0 ∈ b.to_list.map (prod.snd) then
+  -- trace $ na.to_string ++ to_string b.to_list
+  -- else
+  -- skip
+  -- ),
   -- b ←  unsafe_run_io $ mk_file_dep_counts e $ `algebra.algebra.basic,
   -- b ←  unsafe_run_io $ mk_file_dep_counts e $ file_to_import e.get_mathlib_dir (file_name (e.decl_olean `zmod.quadratic_reciprocity)),
   -- trace (list.qsort (λ q w : name × ℕ, w.snd < q.snd) b.to_list),
@@ -245,16 +266,30 @@ run_cmd (do
   skip
 )
 
-run_cmd (do
-  e ← get_env,
-  let nam:=`tactic.basic,
-  -- f ← unsafe_run_io $ mk_file_handle (import_to_file e.get_mathlib_dir nam) io.mode.read,
-  trace $ unsafe_run_io $ get_import_dag e nam
-  -- trace a
-  -- let b := a.head,
-  -- trace ((import_to_file e.get_mathlib_dir b)),
-  -- trace (file_to_import e.get_mathlib_dir (import_to_file e.get_mathlib_dir b))
-)
+-- run_cmd silly `group_theory.free_abelian_group
+-- run_cmd silly `algebra.module.linear_map -- quite successful
+-- run_cmd silly `data.fin.basic
+-- run_cmd silly `data.matrix.basic
+-- run_cmd silly `data.polynomial.field_division
+-- run_cmd silly `group_theory.perm.basic
+-- run_cmd silly `group_theory.perm.sign
+-- run_cmd silly `linear_algebra.coevaluation
+-- run_cmd silly `linear_algebra.dimension
+-- run_cmd silly `linear_algebra.eigenspace
+-- run_cmd silly `linear_algebra.matrix.determinant
+-- run_cmd silly `linear_algebra.matrix.transvection
+-- run_cmd silly `number_theory.number_field
+
+-- run_cmd (do
+--   e ← get_env,
+--   let nam:=`tactic.basic,
+--   -- f ← unsafe_run_io $ mk_file_handle (import_to_file e.get_mathlib_dir nam) io.mode.read,
+--   trace $ unsafe_run_io $ get_import_dag e nam
+--   -- trace a
+--   -- let b := a.head,
+--   -- trace ((import_to_file e.get_mathlib_dir b)),
+--   -- trace (file_to_import e.get_mathlib_dir (import_to_file e.get_mathlib_dir b))
+-- )
 
 
 -- meta def main : tactic unit :=
@@ -270,3 +305,26 @@ run_cmd (do
 --         skip),
 --    unsafe_run_io (close h),
 --    skip
+open io io.fs native tactic
+meta def main : io unit :=
+do
+  e ← run_tactic get_env,
+  -- b ← mk_file_dep_counts e `data.int.basic,
+  G ← get_import_dag e `all,
+  io.print "running on:\n",
+  io.print (to_fmt G.keys),
+  G.keys.mmap' (λ na, do
+    b ← mk_file_dep_counts e na,
+    -- io.print "hi",
+    io.print ("\n" ++ na.to_string ++" >>> \n" ++ to_string b.to_list ++ "\n"),
+    guardb (¬ 0 ∈ b.to_list.map (prod.snd)) <|> (do
+      io.print "##### some zeroes\n",
+      io.print "ok and nok imps\n",
+      let okimps := (G.find na).filter (λ de, ¬((de, 0) ∈ b.to_list)),
+      io.print okimps,
+      let nokimps := (G.find na).filter (λ de, ((de, 0) ∈ b.to_list)),
+      io.print nokimps,
+      io.print "\nall rems\n",
+      io.print $ G.vertices.filter (λ v, ¬ (v, 0) ∈ b.to_list)
+      ))
+-- run_cmd unsafe_run_io main
