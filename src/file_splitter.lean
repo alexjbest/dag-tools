@@ -8,7 +8,7 @@ import topology.algebra.module
 import topology.algebra.ordered.basic
 import ring_theory.discrete_valuation_ring
 import algebra.lie.classical
-import all
+-- import all
 import system.io
 import data.list.lex
 
