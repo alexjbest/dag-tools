@@ -27,6 +27,7 @@ meta def edges (d : dag T) : list (T × T) := native.rb_map.fold d []
 meta def erase_all (d : dag T) (l : list T) : dag T := l.foldl (λ o v, native.rb_map.fold (native.rb_map.erase o v) (native.rb_map.erase o v) (λ w ll oll, native.rb_map.insert oll w (ll.erase v))) d
 meta def num_edges (d : dag T) : ℕ := d.fold 0 (λ _ l o, o + l.length)
 
+section
 variables [has_to_format T]
 open format prod native.rb_map
 private meta def format_key_data (k : T) (d : list T) (first : bool) : format :=
@@ -36,6 +37,7 @@ meta instance : has_to_format (dag T) :=
 ⟨λ m, group $ to_fmt "[" ++ nest 1 (fst (fold m (to_fmt "", tt) (λ k d p, (fst p ++ format_key_data k d (snd p), ff)))) ++
               to_fmt "]"⟩
 meta instance : has_repr (dag T) := ⟨λ s, (has_to_format.to_format s).to_string⟩
+end
 
 
 open native

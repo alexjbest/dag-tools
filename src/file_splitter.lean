@@ -8,7 +8,7 @@ import topology.algebra.module
 import topology.algebra.ordered.basic
 import ring_theory.discrete_valuation_ring
 import algebra.lie.classical
--- import all
+import all
 import system.io
 import data.list.lex
 
@@ -124,10 +124,10 @@ open tactic
 meta def mk_file_dep_counts_basic (env : environment) (fname : name) : rb_counter name :=
 let G := mk_file_dag env fname,
     Gr := G.reachable_table in
-Gr.fold (rb_counter.mk _) (λ k d o, k.deps.foldl
+(Gr.fold (rb_counter.mk _) (λ k d o, k.deps.foldl
   (λ o2 dep, if env.is_in_mathlib dep then
       o2.incr_by (file_to_import env.get_mathlib_dir $ file_name $ env.decl_olean dep) d.size
-    else o2) o)
+    else o2) o)).erase fname
 
 
 meta def io.handle.get_line_as_string (f : handle) : io string :=
@@ -141,12 +141,12 @@ do
   else do
     l ← f.get_line_as_string,
     let ls := l.split (λ c, c.is_whitespace),
-    if ls.tail.head = "graph." then return [] else -- stupid hack around reserved notation
+    -- if ls.tail.head = "graph." hen return [] else -- stupid hack around reserved notation
     (if ls.head = "import" then
       do a ← get_imports_aux f tt,
-        return (((ls.tail.split_on ("--")).head.filter (≠ "")).map name.from_string ++ a) -- space separated lists on imports (in core)
+        return (((ls.tail.split_on_p (λ s, "--".is_prefix_of s)).head.filter (≠ "")).map name.from_string ++ a) -- space separated lists on imports (in core)
     else
-      if b then
+      if (b ∧ l ≠ "\n") ∨ "/-!".is_prefix_of l then
         return []
       else
         get_imports_aux f b)
@@ -173,12 +173,13 @@ a ← (get_imports e `data.int.basic),
 meta def get_import_dag (e : environment) (file : name) : io (dag name) :=
 get_dag_aux e file (dag.mk _)
 
-meta def mk_file_dep_counts (env : environment) (fname : name) : io (rb_counter name) :=
+open native
+meta def mk_file_dep_counts (env : environment) (fname : name) (Gr : rb_map name (rb_set name)) : io (rb_counter name) :=
 do let dc := mk_file_dep_counts_basic env fname,
   -- io.put_str (to_fmt dc).to_string, -- another beautiful hack
-  G ← get_import_dag env fname,
-  let Gr := G.reachable_table,
-  return $ Gr.fold dc (λ na ln odc, ln.fold odc (λ de odc', odc'.incr_by de ((dc.find na).get_or_else 0)))
+  -- G ← get_import_dag env fname,
+  -- let Gr := G.reachable_table,
+  return $ (Gr.fold dc (λ na ln odc, ln.fold odc (λ de odc', odc'.incr_by de ((dc.find na).get_or_else 0)))).erase fname
 
 open native
 
@@ -221,28 +222,53 @@ meta def dfs_all_paths {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → 
       -- rea) in a.insert v $ ((a.find v).get_or_else mk_rb_set).insert v
 
 meta def all_paths {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)] [decidable_eq T]
-(d : dag T) (src tgt : T) :
-  list (list T) :=
+  (d : dag T) (src tgt : T) : list (list T) :=
 (dfs_all_paths d tgt src $ (mk_rb_map).insert tgt [[tgt]]).find src
 -- #eval all_paths ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5), (5,6),(5,8),(8,7),(8,6), (5,19),(19,7), (6,7)]) 1 7
 
-
+meta def dag.count_descendents {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)] [decidable_eq T]
+  (d : dag T) (start : list T) : ℕ :=
+d.dfs (λ _, nat.succ) 0 start
+-- #eval count_descendents (((dag.mk ℕ).insert_vertex 3).insert_edges [(1, 5), (4,5), (2,5)]) ([1,4,3])
+#check dag.count_descendents
 -- run_cmd (do
 --   e ← get_env,
 --   G ← unsafe_run_io $ get_import_dag e `algebra.group_power.lemmas,
 --   trace (all_paths G `data.int.cast `data.equiv.basic),
   -- skip)
-meta def silly (n : name) : tactic unit := (do
-  e ← get_env,
+meta def get_minimal_imports (e : environment) (n : name) (G : dag name) (Gr := G.reachable_table) :
+  io (rb_set name) := do
   -- let n := `ring_theory.discrete_valuation_ring,
   -- let n := `algebra.lie.classical,
-  b ← unsafe_run_io $ mk_file_dep_counts e n,
-  trace $ b.to_list.qsort (λ q w : name × ℕ, w.snd > q.snd),
-  guardb (0 ∈ b.to_list.map (prod.snd)),
-  G ← unsafe_run_io $ get_import_dag e n,
-  let okimps := (G.find n).filter (λ de, ¬((de, 0) ∈ b.to_list)),
-  trace okimps,
-  trace $ G.vertices.filter (λ v, ¬ (v, 0) ∈ b.to_list),
+  b ← mk_file_dep_counts e n Gr,
+
+  let mins := G.minimal_vertices $ b.keys.filter (λ k, b.find k ≠ some 0),
+  return mins
+
+run_cmd (do
+  e ← get_env,
+  let nam:=`number_theory.lucas_primality,
+  -- f ← unsafe_run_io $ mk_file_handle (import_to_file e.get_mathlib_dir nam) io.mode.read,
+  G ← unsafe_run_io $ get_import_dag e nam,
+  i ← unsafe_run_io $ get_minimal_imports e nam G,
+  trace $ "\n".intercalate $ i.keys.map (λ n, "import "++to_string n),
+  trace $ G.count_descendents (i.keys : list name),
+  i2 ← unsafe_run_io $ get_imports e nam,
+  trace i2,
+  tactic.trace $ G.count_descendents (i2 : list name)
+  -- trace a
+  -- let b := a.head,
+  -- trace ((import_to_file e.get_mathlib_dir b)),
+  -- trace (file_to_import e.get_mathlib_dir (import_to_file e.get_mathlib_dir b))
+)
+
+  -- io.print $ b.to_list.qsort (λ q w : name × ℕ, w.snd > q.snd),
+  -- guardb (0 ∈ b.to_list.map (prod.snd)),
+  -- G ← unsafe_run_io $ get_import_dag e n,
+  -- let okimps := (G.find n).filter (λ de, ¬((de, 0) ∈ b.to_list)),
+  -- trace okimps,
+  -- trace $ G.vertices.filter (λ v, ¬ (v, 0) ∈ b.to_list)
+
   -- trace $ G.minimal_vertices (rb_set.of_list $ G.vertices.filter (λ v, ¬ (v, 0) ∈ b.to_list)),
   -- d← get_decl `vector.to_list_append,
   -- a ←  unsafe_run_io $ get_import_dag e $ file_to_import e.get_mathlib_dir (file_name (e.decl_olean `zmod.quadratic_reciprocity)),
@@ -263,8 +289,6 @@ meta def silly (n : name) : tactic unit := (do
   -- b ←  unsafe_run_io $ mk_file_dep_counts e $ file_to_import e.get_mathlib_dir (file_name (e.decl_olean `zmod.quadratic_reciprocity)),
   -- trace (list.qsort (λ q w : name × ℕ, w.snd < q.snd) b.to_list),
   -- trace $ mk_data e d,
-  skip
-)
 
 -- run_cmd silly `group_theory.free_abelian_group
 -- run_cmd silly `algebra.module.linear_map -- quite successful
@@ -278,6 +302,7 @@ meta def silly (n : name) : tactic unit := (do
 -- run_cmd silly `linear_algebra.eigenspace
 -- run_cmd silly `linear_algebra.matrix.determinant
 -- run_cmd silly `linear_algebra.matrix.transvection
+-- run_cmd silly `algebra.group_power.identities
 -- run_cmd silly `number_theory.number_field
 
 -- run_cmd (do
