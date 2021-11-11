@@ -16,6 +16,8 @@ import data.list.lex
 local attribute [-instance] string_to_name
 open tactic declaration environment io io.fs (put_str_ln close)
 
+/-- These decls are special as they are magically defined in cpp and don't have a genuine lean file
+    source to point to, also they can never not be imported. -/
 def magic_homeless_decls := [`quot, `quot.mk, `quot.lift, `quot.ind]
 
 def list_attrs : list name :=
@@ -34,7 +36,8 @@ def list_attrs : list name :=
   `obviously,
   `ancestor,
   `norm_cast,
-  `nontriviality
+  `nontriviality,
+  `mk_iff
   ]
 -- TODO map to get prios also
 meta def get_decl_attrs (decna : name) : tactic $ list name :=
@@ -392,7 +395,7 @@ d}' src/{fn}.lean\n"
 run_cmd unsafe_run_io (do
   e ← run_tactic get_env,
   -- let L := [`data.sym.basic],
-  let L := [`data.finset.basic],
+  let L := [`logic.relation],
   -- let L := [`linear_algebra.affine_space.basic],
   fdata ← run_tactic $ get_file_data e L.head (mk_file_to_import e),
   -- print_ln fdata,
@@ -454,7 +457,7 @@ do
         with
       | result.success w _ := w
       | result.exception msg _ _ :=
-        "LINTER FAILED:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ())
+        "LINTER FAILED:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ()) -- TODO
       end) 64,
     -- b ← mk_file_dep_counts e na,
     -- -- io.print "hi",
