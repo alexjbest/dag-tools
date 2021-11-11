@@ -16,6 +16,7 @@ import data.list.lex
 local attribute [-instance] string_to_name
 open tactic declaration environment io io.fs (put_str_ln close)
 
+def magic_homeless_decls := [`quot, `quot.mk, `quot.lift, `quot.ind]
 
 def list_attrs : list name :=
 -- [`_can_lift, `_ext_core, `_ext_lemma_core, `_localized, `_refl_lemma, `_simp.sizeof, `_simp_cache, `_simps_str, `_squeeze_loc, `algebra, `alias, `ancestor, `breakpoint, `class, `congr, `continuity, `derive, `derive_handle, `elab_as_eliminator, `elab_simple, `elab_strategy, `elab_with_expected_type, `elementwise, `ematch, `ematch_lhs, `equiv_rw_simp, `ext, `field_simps, `functor_norm, `ghost_simps, `higher_order, `hint_tactic, `hole_command, `inline, `instance, `integral_simps, `interactive, `intro, `inverse, `irreducible, `is_poly, `library_note, `linter, `main_declaration, `measurability, `mfld_simps, `mk_iff, `monad_norm, `mono, `monotonicity, `no_inst_pattern, `no_rsimp, `nolint, `nontriviality, `norm, `norm_cast, `norm_num, `notation_class, `obviously, `parity_simps, `parsing_only, `pattern, `pp_nodot, `pp_using_anonymous_constructor, `pre_smt, `protect_proj, `protected, `push_cast, `reassoc, `recursor, `reducibility, `reducible, `refl, `replaceable, `rewrite, `rsimp, `semireducible, `simp, `simps, `split_if_reduction, `subst, `sugar, `sugar_nat, `symm, `tactic_doc, `tidy, `to_additive, `to_additive_aux, `to_additive_ignore_args, `to_additive_relevant_arg, `to_additive_reorder, `trans, `transport_simps, `typevec, `unify, `user_attribute, `user_command, `user_notation, `vm_monitor, `vm_override, `wrapper_eq, `zify]
@@ -58,7 +59,7 @@ end
 meta def environment.get_project_dir (e : environment) (n : name) (k : ℕ) : string :=
 (do
   s ← e.decl_olean n,
-  return $ s.popn_back k).get_or_else "Hello, I'm trapped in an error string, please let me out"
+  return $ s.popn_back k).get_or_else sformat!"Hello! I'm {n} trapped in an error string, please let me out"
 
 /-- A hackish way to get the `src` directory of mathlib. -/
 meta def environment.get_mathlib_dir (e : environment) : string :=
@@ -131,7 +132,8 @@ let na := decl.to_name,
     { decl_name := na,
       file_name := fname,
       file_pos := po,
-      deps := (list_items decl.type ++ list_items decl.value ++ attrd).erase_dup, }) <$>
+      deps := -- dont even consider quot and friends
+        (list_items decl.type ++ list_items decl.value ++ attrd).erase_dup.diff magic_homeless_decls, }) <$>
   get_attr_deps na
 
 /-- Creates an import data tuple for every declaration in file `fname`. -/
@@ -164,16 +166,16 @@ let fn_string := import_to_file env.get_mathlib_dir fname in
 --     option.some <$> mk_data env file_to_import d na else none)
 
 /-- Creates a dag of input data. -/
-meta def mk_file_dag_of_file_data
-  (fdata : list import_data) :
+meta def mk_file_dag_of_file_data (fdata : list import_data) :
   dag import_data :=
 -- let fdata := mk_file_data env fname file_to_import,
-  let decl_names := fdata.map import_data.decl_name in
+  -- let decl_names := fdata.map import_data.decl_name in
 fdata.foldl
   (λ G id,
     id.deps.foldl
-      (λ G2 dep, ((fdata.find (λ el : import_data, el.decl_name = dep)).map -- todo maybe replace with an rb_map
-        (λ a, G2.insert_edge a id)).get_or_else G2)
+      (λ G2 dep,
+        ((fdata.find (λ el : import_data, el.decl_name = dep)).map -- todo maybe replace with an rb_map
+          (λ a, G2.insert_edge a id)).get_or_else G2)
       (G.insert_vertex id))
   (dag.mk _)
 
@@ -330,7 +332,7 @@ let mathlib_pre := e.get_mathlib_dir,
 λ file,
 let rest := (file.get_rest mathlib_pre).get_or_else $
             (file.get_rest core_pre).get_or_else
-           "Hello, I'm trapped in an error string, please let me out" in
+           sformat!"Hello, I'm {file} trapped in an error string, please let me out" in
   (name.from_components ((rest.popn_back 5).split_on '/')).remove_default
 
 meta def mk_file_dep_counts (env : environment) (fname : name) (Gr : rb_map name (rb_set name))
@@ -386,88 +388,23 @@ d}' src/{fn}.lean\n"
 -- skip
 -- tactic.get_attributes `logic.nontrivial
 
-section ignore
-  def good_files : list name :=
-  [
-  `algebra.big_operators.enat,
-  `algebra.big_operators.fin,
-  `algebra.big_operators.finsupp,
-  `algebra.big_operators.option,
-  `algebra.char_p.quotient,
-  `algebra.group_power.identities,
-  `algebra.hierarchy_design,
-  `algebra.order.pointwise,
-  `algebraic_geometry.prime_spectrum.noetherian,
-  `analysis.analytic.radius_liminf,
-  `analysis.convex.complex,
-  `analysis.hofer,
-  `analysis.inner_product_space.conformal_linear_map,
-  `category_theory.limits.constructions.binary_products,
-  `category_theory.limits.constructions.weakly_initial,
-  `category_theory.limits.shapes.concrete_category,
-  `category_theory.linear,
-  `category_theory.preadditive,
-  `category_theory.products.bifunctor,
-  `combinatorics.choose.bounds,
-  `combinatorics.derangements.exponential,
-  `data.buffer.parser,
-  `data.fintype.fin,
-  `data.int.absolute_value,
-  `data.int.nat_prime,
-  `data.list.prod_monoid,
-  `data.nat.choose.vandermonde,
-  `data.polynomial.cardinal,
-  `data.real.pi.leibniz,
-  `data.real.pointwise,
-  `data.vector,
-  `dynamics.fixed_points.topology,
-  `field_theory.mv_polynomial,
-  `linear_algebra,
-  `linear_algebra.affine_space.basic,
-  `linear_algebra.charpoly.to_matrix,
-  `measure_theory.integral.divergence_theorem,
-  `number_theory.basic,
-  `number_theory.lucas_primality,
-  `number_theory.sum_two_squares,
-  `probability_theory.notation,
-  `ring_theory.fintype,
-  `system.io,
-  `system.io_interface,
-  `tactic.by_contra,
-  `tactic.converter.apply_congr,
-  `tactic.dec_trivial,
-  `tactic.lean_core_docs,
-  `tactic.linarith.lemmas,
-  `tactic.noncomm_ring,
-  `tactic.norm_swap,
-  `tactic.nth_rewrite,
-  `tactic.obviously,
-  `tactic.rewrite_search.frontend,
-  `tactic.show_term,
-  `tactic.simp_rw,
-  `tactic.simpa,
-  `topology.category.CompHaus,
-  `topology.category.Profinite,
-  `topology.category.Top.epi_mono,
-  `topology.uniform_space.complete_separated]
-end ignore
-
-#print prefix _localized
 -- set_option profiler true
 run_cmd unsafe_run_io (do
   e ← run_tactic get_env,
   -- let L := [`data.sym.basic],
   let L := [`data.finset.basic],
-  let L := [`linear_algebra.affine_space.basic],
+  -- let L := [`linear_algebra.affine_space.basic],
   fdata ← run_tactic $ get_file_data e L.head (mk_file_to_import e),
+  -- print_ln fdata,
   G ← get_import_dag e L,
+  -- print_ln (to_fmt G),
   -- let file_to_import := mk_file_to_import e,
   -- let G' := mk_file_dag e `algebra.group_with_zero.basic file_to_import,
   -- print_ln G'.keys,
   -- print_ln $to_fmt G,
   let Gr := G.reachable_table,
   let T := L.map (λ nam, optimize_imports e nam G Gr fdata),
-  -- print T,
+  -- print_ln T,
   ((T.filter (λ R : name × list string × list string × ℕ × ℕ, R.2.2.2.1 > R.2.2.2.2)).map
     output_to_sed).mmap print_ln)
 
