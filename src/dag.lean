@@ -31,11 +31,11 @@ section
 variables [has_to_format T]
 open format prod native.rb_map
 private meta def format_key_data (k : T) (d : list T) (first : bool) : format :=
-(if first then to_fmt "" else to_fmt "," ++ line) ++ to_fmt "id :" ++ to_fmt k ++ space ++ to_fmt ":" ++ space ++ to_fmt d -- todo what symbol?
+(if first then to_fmt "" else to_fmt "," ++ line) ++ "\"" ++ to_fmt k ++ "\""  ++ space ++ to_fmt "-> {" ++ space ++ to_fmt (",".intercalate $ d.map (λ a, "\""++(format.to_string $ to_fmt a) ++ "\"")) ++ space ++ "};" -- todo what symbol?
 
 meta instance : has_to_format (dag T) :=
-⟨λ m, group $ to_fmt "[" ++ nest 1 (fst (fold m (to_fmt "", tt) (λ k d p, (fst p ++ format_key_data k d (snd p), ff)))) ++
-              to_fmt "]"⟩
+⟨λ m, group $ to_fmt "digraph D {" ++ nest 1 (fst (fold m (to_fmt "", tt) (λ k d p, (fst p ++ format_key_data k d (snd p), ff)))) ++
+              to_fmt "}"⟩
 meta instance : has_repr (dag T) := ⟨λ s, (has_to_format.to_format s).to_string⟩
 end
 
@@ -118,13 +118,14 @@ open native
 /-- Return the list of minimal vertices in a dag -/
 meta def minimal_vertices (d : dag T) (start : list T := d.vertices) : rb_set T :=
 let aux : rb_map T bool :=
-d.dfs (λ v acc, if acc.contains v then acc else acc.insert v tt)
-      mk_rb_map
+d.dfs (λ v acc, if acc.contains v then acc else acc.insert v ff)
+      (start.foldl (λ (acc : rb_map T bool) v, acc.insert v tt) mk_rb_map)
       start
       (λ v de acc, acc.insert de ff) in
 aux.fold mk_rb_set $ λ v b acc, if b then acc.insert v else acc
 
--- #eval (((dag.mk ℕ).insert_edges [(1,2), (1,3), (2,4), (3,4)]).minimal_vertices $ [2,4,3]).to_list
+-- #eval (((dag.mk ℕ).insert_edges [(3,4), (4,5)]).minimal_vertices $ [3]).to_list
+-- #eval (((dag.mk ℕ).insert_edges [(1,2), (1,3), (2,4), (3,4), (4,5)]).minimal_vertices $ [2,3]).to_list
 
 meta def merge_el (S : list (list T)) : option (list T) → option (list T) → list (list T)
 | none _ := S
