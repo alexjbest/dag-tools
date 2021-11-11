@@ -17,6 +17,14 @@ local attribute [-instance] string_to_name
 open tactic declaration environment io io.fs (put_str_ln close)
 
 
+def list_attrs : list name :=
+-- [`_can_lift, `_ext_core, `_ext_lemma_core, `_localized, `_refl_lemma, `_simp.sizeof, `_simp_cache, `_simps_str, `_squeeze_loc, `algebra, `alias, `ancestor, `breakpoint, `class, `congr, `continuity, `derive, `derive_handle, `elab_as_eliminator, `elab_simple, `elab_strategy, `elab_with_expected_type, `elementwise, `ematch, `ematch_lhs, `equiv_rw_simp, `ext, `field_simps, `functor_norm, `ghost_simps, `higher_order, `hint_tactic, `hole_command, `inline, `instance, `integral_simps, `interactive, `intro, `inverse, `irreducible, `is_poly, `library_note, `linter, `main_declaration, `measurability, `mfld_simps, `mk_iff, `monad_norm, `mono, `monotonicity, `no_inst_pattern, `no_rsimp, `nolint, `nontriviality, `norm, `norm_cast, `norm_num, `notation_class, `obviously, `parity_simps, `parsing_only, `pattern, `pp_nodot, `pp_using_anonymous_constructor, `pre_smt, `protect_proj, `protected, `push_cast, `reassoc, `recursor, `reducibility, `reducible, `refl, `replaceable, `rewrite, `rsimp, `semireducible, `simp, `simps, `split_if_reduction, `subst, `sugar, `sugar_nat, `symm, `tactic_doc, `tidy, `to_additive, `to_additive_aux, `to_additive_ignore_args, `to_additive_relevant_arg, `to_additive_reorder, `trans, `transport_simps, `typevec, `unify, `user_attribute, `user_command, `user_notation, `vm_monitor, `vm_override, `wrapper_eq, `zify]
+-- [`_ext_core, `_ext_lemma_core, `alias, `ancestor, `congr, `continuity, `elementwise, `ematch, `equiv_rw_simp, `ext, `field_simps, `functor_norm, `ghost_simps, `higher_order, `integral_simps, `interactive, `intro, `inverse, `irreducible, `is_poly, `library_note, `linter, `main_declaration, `measurability, `mfld_simps, `mk_iff, `monad_norm, `mono, `monotonicity, `no_inst_pattern, `no_rsimp, `nolint, `nontriviality, `norm, `norm_cast, `norm_num, `notation_class, `obviously, `parity_simps, `pattern, `pp_nodot, `protect_proj, `protected, `push_cast, `reassoc, `recursor, `reducibility, `reducible, `refl, `replaceable, `rewrite, `rsimp, `semireducible, `simp, `simps, `split_if_reduction, `subst, `symm, `tactic_doc, `tidy, `to_additive, `trans, `transport_simps, `unify, `user_attribute, `user_command, `zify]
+[`ext, `simps, `continuity]
+-- TODO map to get prios also
+meta def get_decl_attrs (decna : name) : tactic $ list name :=
+list_attrs.mfilter (λ ana, do (tactic.has_attribute ana decna >> return tt) <|> return ff)
+
 /-- pre should have a slash at the end -/
 def import_to_file (pre : string) (im : name) : string :=
 pre ++ im.to_string_with_sep "/" ++ ".lean"-- TODO windows lol
@@ -91,35 +99,66 @@ meta instance : has_to_string import_data :=
 meta instance : has_to_tactic_format import_data :=
 ⟨λ b, return $ to_fmt b⟩
 
+meta def get_attr_deps (n : name) : tactic (list name) :=
+do
+  ll ← get_decl_attrs n,
+  list.mmap_filter (λ n, do (option.some <$> get_user_attribute_name n) <|> return none) ll
+  -- o ←  ll.mmap_filter (λ ana, pure $ get_user_attribute_name ana),
+  -- return o
+
 /-- Given a declaration return a structure of its name, position, list of dependent decl names and
     filename. -/
-meta def mk_data (env : environment) (file_to_import : string → name) (decl : declaration) : import_data :=
+meta def mk_data (env : environment) (file_to_import : string → name)
+  (decl : declaration) : tactic import_data :=
 let na := decl.to_name,
     po := env.decl_pos na,
-    deps := (list_items decl.type ++ list_items decl.value).erase_dup,
     fname := file_to_import $ file_name $ env.decl_olean na in
-  { decl_name := na,
-    file_name := fname,
-    file_pos := po,
-    deps := deps, }
+  (λ attrd,
+    { decl_name := na,
+      file_name := fname,
+      file_pos := po,
+      deps := (list_items decl.type ++ list_items decl.value ++ attrd).erase_dup, }) <$>
+  get_attr_deps na
 
-/-- Creates an import data tuple for every declaration in  file `fname`. -/
-meta def mk_file_data (env : environment) (fname : name) (file_to_import : string → name) :
-  list import_data :=
-trace_val $let fn_string := trace "oog" trace_val $ import_to_file env.get_mathlib_dir fname in
+/-- Creates an import data tuple for every declaration in file `fname`. -/
+meta def get_file_data (env : environment) (fname : name) (file_to_import : string → name) :
+  tactic $ list import_data :=
+let fn_string := import_to_file env.get_mathlib_dir fname in
 (env.get_decls.filter
-  (λ d : declaration, env.decl_olean d.to_name = fn_string)).map
+  (λ d : declaration, env.decl_olean d.to_name = fn_string)).mmap
     (mk_data env file_to_import)
 
+-- /-- Given a declaration return a structure of its name, position, list of dependent decl names and
+--     filename. -/
+-- meta def mk_data (env : environment) (file_to_import : string → name)
+--   (decl : declaration) (na : name) : tactic import_data :=
+-- let po := env.decl_pos na,
+--     fname := file_to_import $ file_name $ env.decl_olean na in
+--   (λ attrd,
+--     { decl_name := na,
+--       file_name := fname,
+--       file_pos := po,
+--       deps := (list_items decl.type ++ list_items decl.value ++ attrd).erase_dup, }) <$>
+--   get_attr_deps env na
+
+-- /-- Creates an import data tuple for every declaration in file `fname`. -/
+-- meta def get_file_data (env : environment) (fname : name) (file_to_import : string → name) :
+--   tactic $ list import_data :=
+-- let fn_string := import_to_file env.get_mathlib_dir fname in
+-- env.get_decls.mmap_filter (λ d, let na := d.to_name in if
+--   env.decl_olean na = fn_string then
+--     option.some <$> mk_data env file_to_import d na else none)
+
 /-- Creates a dag of input data. -/
-meta def mk_file_dag (env : environment) (fname : name) (file_to_import : string → name) :
+meta def mk_file_dag_of_file_data
+  (fdata : list import_data) :
   dag import_data :=
-let fdata := mk_file_data env fname file_to_import,
-    decl_names := trace "o " trace_val $ fdata.map import_data.decl_name in
+-- let fdata := mk_file_data env fname file_to_import,
+  let decl_names := fdata.map import_data.decl_name in
 fdata.foldl
   (λ G id,
     id.deps.foldl
-      (λ G2 dep, trace_val $ ((fdata.find (λ el : import_data, el.decl_name = dep)).map -- todo maybe replace with an rb_map
+      (λ G2 dep, ((fdata.find (λ el : import_data, el.decl_name = dep)).map -- todo maybe replace with an rb_map
         (λ a, G2.insert_edge a id)).get_or_else G2)
       (G.insert_vertex id))
   (dag.mk _)
@@ -190,10 +229,6 @@ meta def dag.count_descendents {T : Type*} [has_lt T] [decidable_rel ((<) : T �
   (d : dag T) (start : list T) : ℕ :=
 d.dfs (λ _, nat.succ) 0 start
 
-#eval ((dag.mk ℕ).insert_edges [(1,2), (1,3), (1,6), (6,4), (2,4), (3,4), (4,5), (4,7), (5,8), (7,8)]).count_descendents $ [2,3,6]
-#eval ((dag.mk ℕ).insert_edges [(1,2), (2,3), (3,4), (4,5)]).count_descendents $ [2]
-#eval ((dag.mk ℕ).insert_vertex 2).count_descendents $ [2]
-
 meta def dag.count_all_descendents {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)] [decidable_eq T]
   (d : dag T) (start : list T := d.vertices) : rb_counter T :=
 d.dfs (λ v acc, acc.insert v $ 1 + ((d.find v).map $ λ de, acc.zfind de).sum) mk_rb_map start
@@ -202,18 +237,23 @@ d.dfs (λ v acc, acc.insert v $ 1 + ((d.find v).map $ λ de, acc.zfind de).sum) 
 open tactic
 
 open native
-meta def mk_file_dep_counts_basic (env : environment) (fname : name) (file_to_import : string → name) :
+meta def mk_file_dep_counts_basic (env : environment) (fname : name) (file_to_import : string → name)
+  (fdata : list import_data) :
   rb_counter name :=
-let G := mk_file_dag env fname file_to_import,
+let G := mk_file_dag_of_file_data fdata,
     Gr := G.count_all_descendents in
 (Gr.fold (rb_counter.mk _) (λ k d o, k.deps.foldl
-  (λ o2 dep, --if env.is_in_mathlib dep then
-      o2.incr_by (file_to_import $ file_name $ env.decl_olean dep) d
-    -- else o2
-    ) o)).erase fname
+  (λ o2 dep, let imp := file_to_import $ file_name $ env.decl_olean dep in
+    if ¬ (`init).is_prefix_of imp then
+      o2.incr_by imp d
+    else o2) o)).erase fname
 
+meta def remove_trail : list char → list char
+| ['\n'] := []
+| (a :: b) := a :: remove_trail b
+| [] := []
 meta def io.handle.get_line_as_string (f : handle) : io string :=
-do g ← fs.get_line f, return g.to_list.as_string
+do g ← fs.get_line f, return $ (remove_trail g.to_list).as_string
 
 meta def get_imports_aux : handle → bool → io (list name)
 | f b :=
@@ -222,7 +262,7 @@ do
   if eo then return []
   else do
     l ← f.get_line_as_string,
-    let ls := l.split (λ c, c.is_whitespace),
+    let ls := l.split_on ' ',
     -- if ls.tail.head = "graph." hen return [] else -- stupid hack around reserved notation
     (if ls.head = "import" then
       do a ← get_imports_aux f tt,
@@ -244,6 +284,11 @@ do
   l ← get_imports_aux f ff,
   fs.close f,
   return l
+
+meta def is_default (e : environment) (file : name) : io bool :=
+do
+  ((mk_file_handle (import_to_file e.get_mathlib_dir file) io.mode.read >> return ff) <|>
+      (mk_file_handle (import_to_file (e.get_core_dir) file) io.mode.read >> return ff) <|> return tt)
 
 meta def get_dag_aux (e : environment) : name → dag name → io (dag name)
 | n d := do
@@ -269,11 +314,11 @@ let rest := (file.get_rest mathlib_pre).get_or_else $
            "Hello, I'm trapped in an error string, please let me out" in
   (name.from_components ((rest.popn_back 5).split_on '/')).remove_default
 
-meta def mk_file_dep_counts (env : environment) (fname : name) (Gr : rb_map name (rb_set name)) :
+meta def mk_file_dep_counts (env : environment) (fname : name) (Gr : rb_map name (rb_set name))
+  (fdata : list import_data) :
   rb_counter name :=
 let file_to_import := mk_file_to_import env,
-    dc := mk_file_dep_counts_basic env fname file_to_import in
-    trace (to_string dc) $
+    dc := mk_file_dep_counts_basic env fname file_to_import fdata in
   -- io.put_str (to_fmt dc).to_string, -- another beautiful hack
   -- G ← get_import_dag env fname,
   (dc.fold dc
@@ -285,12 +330,42 @@ let file_to_import := mk_file_to_import env,
 --   G ← unsafe_run_io $ get_import_dag e `algebra.group_power.lemmas,
 --   trace (all_paths G `data.int.cast `data.equiv.basic),
   -- skip)
-meta def get_minimal_imports (e : environment) (n : name) (G : dag name) (Gr := G.reachable_table) :
+meta def get_minimal_imports (e : environment) (n : name) (G : dag name) (Gr := G.reachable_table)
+  (fdata : list import_data) :
   rb_set name :=
   -- let n := `ring_theory.discrete_valuation_ring,
   -- let n := `algebra.lie.classical,
-  let b := mk_file_dep_counts e n Gr in
-      G.minimal_vertices $ trace_val $ b.keys.filter (λ k, b.find k ≠ some 0)
+  let b := mk_file_dep_counts e n Gr fdata in
+      G.minimal_vertices $ b.keys.filter (λ k, b.find k ≠ some 0)
+
+meta def optimize_imports (e : environment) (nam : name) (G : dag name) (Gr := G.reachable_table)
+  (fdata : list import_data) :
+  name × list string × list string × ℕ × ℕ :=
+  let new_imp := get_minimal_imports e nam G Gr fdata,
+      old_imp := G.find nam in
+  (nam,
+   old_imp.map name.to_string,
+   (new_imp.keys.map to_string).qsort (λ a b, a < b : string → string → bool),
+   G.count_descendents (old_imp : list name),
+   G.count_descendents (new_imp.keys : list name))
+
+-- https://unix.stackexchange.com/questions/342516/sed-remove-all-matches-in-the-file-and-insert-some-lines-where-the-first-match
+-- Note:
+-- This clobbers import comments
+-- Mac should use gsed
+-- This pipes to stdout, use -i for in-place
+def output_to_sed (o : name × list string × list string × ℕ × ℕ) : string :=
+let ⟨na, ol, ne, oli, nei⟩ := o,
+    fn := na.to_string_with_sep "/",
+    imps := "\\\n".intercalate $ ne.map (λ i, sformat!"import {i}") in
+sformat!"# {oli} -> {nei} {ol}\n" ++
+"sed '/^import /{x;//!c\\" ++ sformat!"
+{imps}
+d}' src/{fn}.lean\n"
+
+--   >>= list.mmap tactic.get_user_attribute_name ,
+-- skip
+-- tactic.get_attributes `logic.nontrivial
 
 section ignore
   def good_files : list name :=
@@ -358,111 +433,22 @@ section ignore
   `topology.uniform_space.complete_separated]
 end ignore
 
-meta def optimize_imports (e : environment) (nam : name) (G : dag name) (Gr := G.reachable_table) :
-  name × list string × ℕ × ℕ :=
-  let i := get_minimal_imports e nam G Gr,
-      i2 := G.find nam in
-  (nam, (i.keys.map to_string).qsort (λ a b, a < b : string → string → bool),
-    G.count_descendents (i.keys : list name),
-    -- i2 ++
-    G.count_descendents (i2 : list name))
-
--- https://unix.stackexchange.com/questions/342516/sed-remove-all-matches-in-the-file-and-insert-some-lines-where-the-first-match
--- Note:
--- This clobbers import comments
--- Mac should use gsed
--- This pipes to stdout, use -i for in-place
-def output_to_sed (o : name × list string × ℕ × ℕ) : string :=
-let fn := o.1.to_string_with_sep "/",
-    imps := "\\\n".intercalate $ o.2.1.map (λ i, sformat!"import {i}") in
-"sed '/^import /{x;//!c\\" ++ sformat!"
-{imps}
-d}' src/{fn}.lean\n"
-
--- #eval trace_val $ output_to_sed (`a.b.c, "import ok
--- import hi", 0,0)
--- #exit
-
 -- set_option profiler true
-run_cmd unsafe_run_io (do
-  e ← run_tactic get_env,
-  let L := good_files.take 1,
-  G ← get_import_dag e L,
-  -- let file_to_import := mk_file_to_import e,
-  -- let G' := mk_file_dag e `algebra.group_with_zero.basic file_to_import,
-  -- print_ln G'.keys,
-  -- print_ln $to_fmt G,
-  let Gr := G.reachable_table,
-  let nal :=[`init.util, `order.complete_boolean_algebra, `system.random, `init.meta.ac_tactics, `init.data.list.basic, `data.list.chain, `init.meta.async_tactic, `data.list.min_max, `tactic.cache, `data.nat.choose.basic, `data.multiset.erase_dup, `init.meta.well_founded_tactics, `init.funext, `data.nat.pairing, `init.meta.smt.interactive, `init.meta.format, `data.equiv.basic, `data.finset.prod, `tactic.show_term, `init.data.subtype.basic, `data.subtype, `init.data.unsigned.basic, `init.data.to_string, `tactic.tidy, `tactic.pretty_cases, `init.data.sum.basic, `order.rel_classes,
-`tactic.monotonicity.interactive, `init.data.nat.bitwise, `tactic.push_neg, `init.meta.converter, `tactic.trunc_cases, `data.pfun, `tactic.lint.misc, `control.traversable.basic, `data.dlist.basic, `init.control.monad_fail, `init.meta.local_context, `init.meta.interactive, `data.pi, `init.meta.level, `data.rat.basic, `data.nat.enat, `init.data.list.instances, `data.set.bool, `tactic.replacer, `tactic.pi_instances, `algebra.group_power.lemmas, `data.part, `tactic.tauto,
-`init.data.nat.div, `tactic.localized, `algebra.group_power.order, `algebra.group.inj_surj, `order.compare, `control.traversable.derive, `init.data.list.lemmas, `tactic.congr, `init.meta.options, `meta.expr, `data.int.cast, `init.meta.mk_has_sizeof_instance, `init.meta.smt.rsimp, `data.sigma.basic, `tactic.lint.basic, `init.control.except,
-`data.set.lattice, `logic.relator, `init.meta.attribute, `init.meta.tagged_format, `data.list.of_fn, `tactic.generalize_proofs, `init.coe, `tactic.hint, `tactic.core, `init.data.subtype, `init.meta.converter.interactive, `init.meta.expr_address, `tactic.where,
-`data.list.lex, `data.finset.fold, `order.boolean_algebra, `tactic.itauto, `tactic.dependencies, `tactic.binder_matching, `tactic.norm_cast, `init.meta.interaction_monad, `algebra.group_power.basic, `data.rat.cast, `order.preorder_hom, `init.algebra.functions, `algebra.group.prod, `init.meta.rec_util, `init.meta.comp_value_tactics,
-`control.functor, `logic.basic, `init.meta.rewrite_tactic, `algebra.group.units, `algebra.group.to_additive, `init.meta.hole_command, `tactic.norm_num, `init.data.repr, `tactic.rewrite, `init.cc_lemmas, `data.list.prod_monoid,
-`tactic.derive_inhabited, `tactic.ext, `data.list.erase_dup, `data.prod, `init.data.bool.basic, `tactic.obviously, `init.control.option, `init.meta.rb_map, `init.meta.lean.parser, `data.finset.basic, `tactic.interactive, `tactic.choose, `init.control.lawful, `init.meta.constructor_tactic,
-`logic.function.conjugate, `init.data.setoid, `control.traversable.instances, `tactic.auto_cases, `algebra.order.sub, `data.bool, `tactic.simps, `data.vector.basic, `tactic.simp_command, `algebra.group.semiconj, `tactic.restate_axiom,
-`init.control, `data.list.permutation, `tactic.mk_iff_of_inductive_prop, `init.control.state, `data.multiset.basic, `init.control.monad, `data.equiv.set, `data.mllist, `tactic.lift, `algebra.group.hom_instances, `init.propext, `data.pnat.basic, `data.option.defs,
-`tactic.generalizes, `init.meta.exceptional, `init.meta.name, `data.multiset.pi, `data.list.defs, `data.set.function, `data.dlist, `data.set.basic, `init.algebra.classes, `tactic.protected, `data.finset.option, `control.traversable.lemmas, `data.list.nodup, `tactic.elide, `order.basic, `init.data.list, `tactic.lean_core_docs,
-`init.data.list.qsort, `tactic.explode, `init.data.option.basic, `data.rbtree.init, `init.meta.smt.congruence_closure, `init.meta.smt, `data.nat.pow, `init.meta.task, `algebra.group_with_zero.basic, `algebra.regular.basic, `tactic.lint.simp, `control.basic, `data.nat.factorial.basic, `algebra.order.ring, `data.nat.basic, `order.directed, `tactic.fix_reflect_string, `init.control.alternative, `algebra.order.field, `order.rel_iso, `init.data.sigma.basic,
-`init.control.functor, `tactic.nth_rewrite.congr, `data.multiset.powerset, `init.meta.mk_has_reflect_instance, `init.meta.contradiction_tactic, `control.traversable.equiv, `data.ulift, `init.meta, `init.meta.mk_dec_eq_instance, `init.control.lift, `data.equiv.nat, `init.meta.fun_info, `logic.function.iterate, `tactic.lint, `tactic.project_dir, `data.list.sublists, `tactic.lint.type_classes,
-`data.equiv.encodable.basic, `data.rat.order, `algebra.char_zero, `data.equiv.mul_add, `tactic.basic, `meta.rb_map, `tactic.apply, `init.meta.mk_inhabited_instance, `init.data.nat, `data.finset.lattice, `init.meta.environment, `init.meta.interactive_base, `data.quot, `tactic.split_ifs,
-`init.meta.has_reflect, `tactic.simp_rw, `algebra.big_operators.basic, `group_theory.perm.basic, `logic.nontrivial, `init.meta.backward, `init.function, `init.classical, `tactic.solve_by_elim, `init.meta.expr, `algebra.euclidean_domain, `data.list.perm, `tactic.converter.apply_congr, `order.bounded_lattice, `init.meta.type_context, `data.rat.meta_defs,
-`algebra.group.defs, `init.meta.pexpr, `logic.function.basic, `init.core, `init.meta.smt.smt_tactic, `tactic.transform_decl, `tactic.dec_trivial, `tactic.monotonicity, `data.opposite, `tactic.rcases, `algebra.abs, `tactic.nth_rewrite.basic, `tactic.monotonicity.basic, `data.multiset.nodup, `init.data.string.basic,
-`algebra.group.hom, `system.io_interface, `init.meta.match_tactic, `tactic.alias, `tactic.reserved_notation, `init.data.prod, `data.list.count, `init.data.fin.basic, `data.finset.powerset, `data.multiset.lattice, `init.data.fin.ops, `data.list.lattice, `order.bounds, `data.rbmap.basic, `init.control.combinators, `algebra.group.basic, `init.control.reader,
-`tactic.squeeze, `data.multiset.range, `data.string.defs, `tactic.chain, `algebra.group_with_zero, `order.monotone, `init.data.quot, `data.fin.basic, `algebra.opposites, `algebra.covariant_and_contravariant, `init.data.nat.lemmas, `init.wf, `init.logic, `tactic.simp_result, `order.min_max, `data.buffer,
-`tactic.rename_var, `logic.embedding, `tactic.converter.old_conv, `tactic.simpa, `tactic.algebra, `init.meta.relation_tactics, `init.meta.ref, `data.int.basic, `init.meta.congr_lemma, `algebra.group.type_tags, `data.list.range, `init.meta.simp_tactic, `init.meta.declaration,
-`data.rbtree.default_lt, `init.meta.case_tag, `data.fintype.basic, `data.array.lemmas, `data.buffer.parser, `init.data.subtype.instances, `tactic.finish, `logic.unique, `order.lattice, `tactic.clear, `tactic.monotonicity.lemmas, `data.set.intervals.basic,
-`control.traversable, `init.control.id, `algebra.field, `data.nat.gcd, `init.meta.module_info, `algebra.group.units_hom, `tactic.nth_rewrite, `init.meta.derive, `algebra.group.commute,
-`init.meta.tactic, `tactic.delta_instance, `init.data.sigma.lex, `init.data.fin, `init.data.ordering.basic, `logic.is_empty, `data.set.pairwise, `data.list.forall2,
-`init.meta.converter.conv, `init.meta.set_get_option_tactics, `meta.expr_lens, `tactic.suggest, `data.rel, `data.multiset.fold, `algebra.ring.basic, `data.list.join,
-`control.applicative, `algebra.divisibility, `init.meta.occurrences, `algebra.group.with_one, `data.nat.cast, `algebra.group.pi, `init.meta.injection_tactic, `tactic.converter.interactive,
-`data.list.big_operators, `algebra.order.monoid, `tactic.apply_fun, `order.order_dual, `data.nat.sqrt, `data.sym.basic, `logic.relation, `tactic.wlog, `algebra.order.group,
-`tactic.interactive_expr, `group_theory.group_action.defs, `order.complete_lattice, `control.monad.basic, `tactic.find, `data.finset.pi, `algebra.order.monoid_lemmas, `init.meta.congr_tactic, `tactic.doc_commands, `init.meta.smt.ematch,
-`data.int.char_zero, `data.multiset.finset_ops, `init.algebra.order, `init.data.char.basic, `data.vector, `init.meta.vm, `data.sum, `data.list.pairwise, `order.well_founded, `init.data.nat.basic, `algebra.invertible, `order.galois_connection, `data.list.basic, `data.option.basic, `algebra.group_power, `data.list.zip, `tactic.lint.frontend,
-`system.io, `init.control.applicative, `tactic.unify_equations, `algebra.group_with_zero.defs],
-  -- print_ln $ G.all_paths `algebra.big_operators.enat `algebra.euclidean_domain,
-  print_ln $ G.all_paths `algebra.big_operators.basic `data.nat.enat,
-  print_ln $ G.all_paths `data.nat.enat `tactic.norm_num,
-  print_ln "mins",
-  print_ln $ to_fmt $ G.minimal_vertices [`algebra.big_operators.basic, `data.nat.enat],
-  print_ln $ to_fmt $ G.minimal_vertices nal,
-  -- print $ to_fmt $ Gr.find `algebra.big_operators.enat
-  -- print $ (Gr.ifind `n).to_list
-  let T := L.map (λ nam, optimize_imports e nam G Gr),
-  print T,
-  (T.map output_to_sed).mmap print
-)
-  -- trace a
-  -- let b := a.head,
-  -- trace ((import_to_file e.get_mathlib_dir b)),
-  -- trace (file_to_import e.get_mathlib_dir (import_to_file e.get_mathlib_dir b))
-
-  -- io.print $ b.to_list.qsort (λ q w : name × ℕ, w.snd > q.snd),
-  -- guardb (0 ∈ b.to_list.map (prod.snd)),
-  -- G ← unsafe_run_io $ get_import_dag e n,
-  -- let okimps := (G.find n).filter (λ de, ¬((de, 0) ∈ b.to_list)),
-  -- trace okimps,
-  -- trace $ G.vertices.filter (λ v, ¬ (v, 0) ∈ b.to_list)
-
-  -- trace $ G.minimal_vertices (rb_set.of_list $ G.vertices.filter (λ v, ¬ (v, 0) ∈ b.to_list)),
-  -- d← get_decl `vector.to_list_append,
-  -- a ←  unsafe_run_io $ get_import_dag e $ file_to_import e.get_mathlib_dir (file_name (e.decl_olean `zmod.quadratic_reciprocity)),
-  -- trace a,
-  -- trace (all_paths a `algebra.algebra.basic `tactic.abel),
-  -- trace (all_paths a `number_theory.quadratic_reciprocity `category_theory.whiskering),
-  -- trace $ import_to_file e.get_mathlib_dir $ file_to_import e.get_mathlib_dir$file_name (e.decl_olean `zmod.quadratic_reciprocity),
-  -- G ← unsafe_run_io $ get_import_dag e `data.int.basic,
-  -- G.mfold () (λ na de _, do
-  -- b ←  unsafe_run_io $ mk_file_dep_counts e na,
-  -- if 0 ∈ b.to_list.map (prod.snd) then
-  -- trace $ na.to_string ++ to_string b.to_list
-  -- else
-  -- skip
-  -- ),
-  -- b ←  unsafe_run_io $ mk_file_dep_counts e $ `algebra.algebra.basic,
-  -- b ←  unsafe_run_io $ mk_file_dep_counts e $ file_to_import e.get_mathlib_dir (file_name (e.decl_olean `zmod.quadratic_reciprocity)),
-  -- trace (list.qsort (λ q w : name × ℕ, w.snd < q.snd) b.to_list),
-  -- trace $ mk_data e d,
+-- run_cmd unsafe_run_io (do
+--   e ← run_tactic get_env,
+--   let L := [`logic.unique],
+--   fdata ← run_tactic $ get_file_data e L.head (mk_file_to_import e),
+--   G ← get_import_dag e L,
+--   -- let file_to_import := mk_file_to_import e,
+--   -- let G' := mk_file_dag e `algebra.group_with_zero.basic file_to_import,
+--   -- print_ln G'.keys,
+--   -- print_ln $to_fmt G,
+--   let Gr := G.reachable_table,
+--   let T := L.map (λ nam, optimize_imports e nam G Gr fdata),
+--   -- print T,
+--   ((T.filter (λ R : name × list string × list string × ℕ × ℕ, R.2.2.2.1 > R.2.2.2.2)).map
+--     output_to_sed).mmap print_ln
+-- )
 
 -- run_cmd silly `group_theory.free_abelian_group
 -- run_cmd silly `algebra.module.linear_map -- quite successful
@@ -479,51 +465,50 @@ run_cmd unsafe_run_io (do
 -- run_cmd silly `algebra.group_power.identities
 -- run_cmd silly `number_theory.number_field
 
--- run_cmd (do
---   e ← get_env,
---   let nam:=`tactic.basic,
---   -- f ← unsafe_run_io $ mk_file_handle (import_to_file e.get_mathlib_dir nam) io.mode.read,
---   trace $ unsafe_run_io $ get_import_dag e nam
---   -- trace a
---   -- let b := a.head,
---   -- trace ((import_to_file e.get_mathlib_dir b)),
---   -- trace (file_to_import e.get_mathlib_dir (import_to_file e.get_mathlib_dir b))
--- )
+-- (λ ana, do
+--   ⟨b, prio⟩ ← tactic.has_attribute ana decna,
+--   guardb b,
+--   return (ana, prio))
 
+open interaction_monad
+open io io.fs native tactic
+meta def main : io unit :=
+do
+  e ← run_tactic get_env,
+  G ← get_import_dag e [`all],
+  print_ln G.keys,
+  let Gr := G.reachable_table,
+  print_ln sformat!"running on {G.keys.length} files",
+  s ← run_tactic read,
+  let res := G.keys.map_async_chunked (λ na,
+        match
+    (unsafe_run_io $ do
+      b ← is_default e na,
+      guardb ((¬ b) ∧ e.is_in_mathlib na) >>
+      (do
+      fdata ← run_tactic $ get_file_data e na (mk_file_to_import e),
+      let T := optimize_imports e na G Gr fdata,
+      if T.2.2.2.1 > T.2.2.2.2 then
+        return $ output_to_sed T
+      else return "") <|> return "") s
+        with
+      | result.success w _ := w
+      | result.exception msg _ _ :=
+        "LINTER FAILED:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ())
+      end),
+    -- b ← mk_file_dep_counts e na,
+    -- -- io.print "hi",
+    -- io.print ("\n" ++ na.to_string ++" >>> \n" ++ to_string (b.to_list.qsort (λ q w : name × ℕ, w.snd < q.snd)) ++ "\n"),
+    -- guardb (¬ 0 ∈ b.to_list.map (prod.snd)) <|> (do
+    --   io.print "##### some zeroes\n",
+    --   io.print "ok and nok imps\n",
+    --   let okimps := (G.find na).filter (λ de, ¬((de, 0) ∈ b.to_list)),
+    --   io.print okimps,
+    --   let nokimps := (G.find na).filter (λ de, ((de, 0) ∈ b.to_list)),
+    --   io.print nokimps,
+    --   io.print "\nall rems\n",
+    --   io.print $ G.vertices.filter (λ v, ¬ (v, 0) ∈ b.to_list)
+    -- let o := res.foldl ("\n" ++),
+    print_ln $ "".intercalate res
 
--- meta def main : tactic unit :=
--- do curr_env ← get_env,
---    h ← unsafe_run_io (mk_file_handle "data.yaml" mode.write),
---    let decls := curr_env.fold [] list.cons,
---    let filtered_decls := decls.filter
---      (λ x, not (to_name x).is_internal),
---    filtered_decls.mmap' (λ d,
---      do s ← (print_item_crawl curr_env d),
---         unsafe_run_io (do io.fs.put_str_ln h s,
---                           io.fs.flush h),
---         skip),
---    unsafe_run_io (close h),
---    skip
--- open io io.fs native tactic
--- meta def main : io unit :=
--- do
---   e ← run_tactic get_env,
---   -- b ← mk_file_dep_counts e `data.int.basic,
---   G ← get_import_dag e `all,
---   io.print "running on:\n",
---   io.print (to_fmt G.keys),
---   G.keys.mmap' (λ na, do
---     b ← mk_file_dep_counts e na,
---     -- io.print "hi",
---     io.print ("\n" ++ na.to_string ++" >>> \n" ++ to_string (b.to_list.qsort (λ q w : name × ℕ, w.snd < q.snd)) ++ "\n"),
---     guardb (¬ 0 ∈ b.to_list.map (prod.snd)) <|> (do
---       io.print "##### some zeroes\n",
---       io.print "ok and nok imps\n",
---       let okimps := (G.find na).filter (λ de, ¬((de, 0) ∈ b.to_list)),
---       io.print okimps,
---       let nokimps := (G.find na).filter (λ de, ((de, 0) ∈ b.to_list)),
---       io.print nokimps,
---       io.print "\nall rems\n",
---       io.print $ G.vertices.filter (λ v, ¬ (v, 0) ∈ b.to_list)
---       ))
 -- run_cmd unsafe_run_io main
