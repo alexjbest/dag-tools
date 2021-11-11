@@ -190,6 +190,10 @@ meta def dag.count_descendents {T : Type*} [has_lt T] [decidable_rel ((<) : T �
   (d : dag T) (start : list T) : ℕ :=
 d.dfs (λ _, nat.succ) 0 start
 
+#eval ((dag.mk ℕ).insert_edges [(1,2), (1,3), (1,6), (6,4), (2,4), (3,4), (4,5), (4,7), (5,8), (7,8)]).count_descendents $ [2,3,6]
+#eval ((dag.mk ℕ).insert_edges [(1,2), (2,3), (3,4), (4,5)]).count_descendents $ [2]
+#eval ((dag.mk ℕ).insert_vertex 2).count_descendents $ [2]
+
 meta def dag.count_all_descendents {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)] [decidable_eq T]
   (d : dag T) (start : list T := d.vertices) : rb_counter T :=
 d.dfs (λ v acc, acc.insert v $ 1 + ((d.find v).map $ λ de, acc.zfind de).sum) mk_rb_map start

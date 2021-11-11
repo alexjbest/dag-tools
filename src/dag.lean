@@ -71,14 +71,12 @@ res.map (f v) id
 A very general
  -/
 meta def dfs {α : Type} (d : dag T) (f : T → α → α) (a : α) (start : list T := d.vertices) (g : T → T → α → α := λ _ _, id) : α :=
-(start.foldl (λ acc v, d.dfs_aux f g v acc) (a, mk_rb_map)).fst
+(start.foldl (λ (acc : α × rb_set T) v, if acc.2.contains v then acc else d.dfs_aux f g v acc) (a, mk_rb_map)).fst
 
 -- #eval (((dag.mk ℕ).insert_edges [(9,7),(3,7),(4,3),(4,9)]).dfs_aux
 --   (λ _ acc, acc ++ "")
 --   (λ pa ch acc, acc ++ _root_.to_string (pa,ch) ++ " forms part of an (undirected) cycle!\n") 4 ("", mk_rb_set)).fst
 
-
--- #eval (((((dag.mk ℕ).insert_vertex 3).insert_edge 2 1).insert_edge 1 3).dfs 1 [] (rb_map.mk _ _)).fst
 
 -- TODO is this inefficient?
 /-- Take the sub-graph of things reachable from `v` -/
