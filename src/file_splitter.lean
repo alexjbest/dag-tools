@@ -279,8 +279,8 @@ meta def get_imports (e : environment) (file : name) : io (list name) :=
 do
   f ← mk_file_handle (import_to_file e.get_mathlib_dir file) io.mode.read <|>
       mk_file_handle (import_to_file e.get_mathlib_dir $ file.append `default) io.mode.read <|>
-      mk_file_handle (import_to_file (e.get_core_dir) file) io.mode.read <|>
-      mk_file_handle (import_to_file (e.get_core_dir) $ file.append `default) io.mode.read,
+      mk_file_handle (import_to_file e.get_core_dir file) io.mode.read <|>
+      mk_file_handle (import_to_file e.get_core_dir $ file.append `default) io.mode.read,
   l ← get_imports_aux f ff,
   fs.close f,
   return l
@@ -289,6 +289,11 @@ meta def is_default (e : environment) (file : name) : io bool :=
 do
   ((mk_file_handle (import_to_file e.get_mathlib_dir file) io.mode.read >> return ff) <|>
       (mk_file_handle (import_to_file (e.get_core_dir) file) io.mode.read >> return ff) <|> return tt)
+
+meta def file_is_in_mathlib (e : environment) (file : name) : io bool :=
+do
+  ((mk_file_handle (import_to_file e.get_mathlib_dir file) io.mode.read >> return tt) <|>
+      (mk_file_handle (import_to_file e.get_mathlib_dir $ file.append `default) io.mode.read >> return tt) <|> return ff)
 
 meta def get_dag_aux (e : environment) : name → dag name → io (dag name)
 | n d := do
@@ -434,21 +439,20 @@ section ignore
 end ignore
 
 -- set_option profiler true
--- run_cmd unsafe_run_io (do
---   e ← run_tactic get_env,
---   let L := [`logic.unique],
---   fdata ← run_tactic $ get_file_data e L.head (mk_file_to_import e),
---   G ← get_import_dag e L,
---   -- let file_to_import := mk_file_to_import e,
---   -- let G' := mk_file_dag e `algebra.group_with_zero.basic file_to_import,
---   -- print_ln G'.keys,
---   -- print_ln $to_fmt G,
---   let Gr := G.reachable_table,
---   let T := L.map (λ nam, optimize_imports e nam G Gr fdata),
---   -- print T,
---   ((T.filter (λ R : name × list string × list string × ℕ × ℕ, R.2.2.2.1 > R.2.2.2.2)).map
---     output_to_sed).mmap print_ln
--- )
+run_cmd unsafe_run_io (do
+  e ← run_tactic get_env,
+  let L := [`algebra.char_p.quotient],
+  fdata ← run_tactic $ get_file_data e L.head (mk_file_to_import e),
+  G ← get_import_dag e L,
+  -- let file_to_import := mk_file_to_import e,
+  -- let G' := mk_file_dag e `algebra.group_with_zero.basic file_to_import,
+  -- print_ln G'.keys,
+  -- print_ln $to_fmt G,
+  let Gr := G.reachable_table,
+  let T := L.map (λ nam, optimize_imports e nam G Gr fdata),
+  -- print T,
+  ((T.filter (λ R : name × list string × list string × ℕ × ℕ, R.2.2.2.1 > R.2.2.2.2)).map
+    output_to_sed).mmap print_ln)
 
 -- run_cmd silly `group_theory.free_abelian_group
 -- run_cmd silly `algebra.module.linear_map -- quite successful
@@ -475,16 +479,18 @@ open io io.fs native tactic
 meta def main : io unit :=
 do
   e ← run_tactic get_env,
-  G ← get_import_dag e [`all],
+  G ← get_import_dag e [`algebra.char_p.quotient],
   print_ln G.keys,
   let Gr := G.reachable_table,
   print_ln sformat!"running on {G.keys.length} files",
   s ← run_tactic read,
   let res := G.keys.map_async_chunked (λ na,
         match
-    (unsafe_run_io $ do
+    (unsafe_run_io $
+    do
       b ← is_default e na,
-      guardb ((¬ b) ∧ e.is_in_mathlib na) >>
+      b2 ← file_is_in_mathlib e na,
+      guardb ((¬ b) ∧ b2) >>
       (do
       fdata ← run_tactic $ get_file_data e na (mk_file_to_import e),
       let T := optimize_imports e na G Gr fdata,
@@ -495,7 +501,7 @@ do
       | result.success w _ := w
       | result.exception msg _ _ :=
         "LINTER FAILED:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ())
-      end),
+      end) 64,
     -- b ← mk_file_dep_counts e na,
     -- -- io.print "hi",
     -- io.print ("\n" ++ na.to_string ++" >>> \n" ++ to_string (b.to_list.qsort (λ q w : name × ℕ, w.snd < q.snd)) ++ "\n"),
