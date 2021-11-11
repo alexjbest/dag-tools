@@ -124,8 +124,8 @@ d.dfs (λ v acc, if acc.contains v then acc else acc.insert v ff)
       (λ v de acc, acc.insert de ff) in
 aux.fold mk_rb_set $ λ v b acc, if b then acc.insert v else acc
 
--- #eval (((dag.mk ℕ).insert_edges [(3,4), (4,5)]).minimal_vertices $ [3]).to_list
--- #eval (((dag.mk ℕ).insert_edges [(1,2), (1,3), (2,4), (3,4), (4,5)]).minimal_vertices $ [2,3]).to_list
+-- #eval (((dag.mk ℕ).insert_edges [(1,2), (1,3), (2,4), (3,4)]).minimal_vertices $ [2,4,3]).to_list
+#eval (((dag.mk ℕ).insert_edges [(1,2), (2,3), (3,4), (4,5)]).minimal_vertices $ [2]).to_list
 
 meta def merge_el (S : list (list T)) : option (list T) → option (list T) → list (list T)
 | none _ := S
@@ -186,15 +186,17 @@ meta def minimal_vertices_with_components (d : dag T) (start : native.rb_set T) 
 --#eval to_string ((((dag.mk ℕ).insert_vertex 3).insert_edges [(1, 5), (3, 2), (4,5), (2,5)]).minimal_vertices_with_components_aux (rb_set.of_list [1,3,4])).2.2
 
 /-- Return a topological sort of the DAG. -/
-meta def topological_sort (d : dag T) : list T :=
-  (native.rb_map.fold d
-    (([] : list T), mk_rb_set)
-    (λ v es stavis,
-      if stavis.snd.contains v then
-        stavis
-      else
-        d.dfs_aux (::) (λ _ _, id) v stavis)
-  ).fst
+meta def topological_sort (d : dag T) (start : list T := d.vertices) : list T :=
+d.dfs (::) [] start
+
+  -- (native.rb_map.fold d
+  --   (([] : list T), mk_rb_set)
+  --   (λ v es stavis,
+  --     if stavis.snd.contains v then
+  --       stavis
+  --     else
+  --       d.dfs_aux (::) (λ _ _, id) v stavis)
+  -- ).fst
 
 -- meta def topological_sort' (d : dag T) [has_to_string T]:tactic unit :=
 -- do
