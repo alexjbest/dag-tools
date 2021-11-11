@@ -122,10 +122,11 @@ d.dfs (λ v acc, if acc.contains v then acc else acc.insert v ff)
       (start.foldl (λ (acc : rb_map T bool) v, acc.insert v tt) mk_rb_map)
       start
       (λ v de acc, acc.insert de ff) in
-aux.fold mk_rb_set $ λ v b acc, if b then acc.insert v else acc
+start.foldl (λ acc v, if (aux.find v).get_or_else ff then acc.insert v else acc) mk_rb_set
 
--- #eval (((dag.mk ℕ).insert_edges [(1,2), (1,3), (2,4), (3,4)]).minimal_vertices $ [2,4,3]).to_list
+#eval (((dag.mk ℕ).insert_edges [(1,2), (1,3), (2,4), (3,4)]).minimal_vertices $ [2,4,3]).to_list
 #eval (((dag.mk ℕ).insert_edges [(1,2), (2,3), (3,4), (4,5)]).minimal_vertices $ [2]).to_list
+#eval (((dag.mk ℕ).insert_vertex 2).minimal_vertices $ [2]).to_list
 
 meta def merge_el (S : list (list T)) : option (list T) → option (list T) → list (list T)
 | none _ := S
