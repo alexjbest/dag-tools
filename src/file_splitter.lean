@@ -144,11 +144,12 @@ do
 
 /-- Given a declaration return a structure of its name, position, list of dependent decl names and
     filename. -/
-meta def mk_data (env : environment) (file_to_import : string → name)
+meta def mk_data (env : environment) (file_to_import : string → name) (fname : name)
   (decl : declaration) : tactic import_data :=
 let na := decl.to_name,
-    po := env.decl_pos na,
-    fname := file_to_import $ file_name $ env.decl_olean na in
+    po := env.decl_pos na
+    --fname := file_to_import $ file_name $ env.decl_olean na
+    in
   (λ attrd,
     { decl_name := na,
       file_name := fname,
@@ -157,13 +158,34 @@ let na := decl.to_name,
         (list_items decl.type ++ list_items decl.value ++ attrd).erase_dup.diff magic_homeless_decls, }) <$>
   get_attr_deps na
 
+#eval (λ inp : list nat, do l ← inp, guardb (l = 1), pure l) [1,2]
+-- meta def aa (env : environment) (fname : name) (file_to_import : string → name) : list declaration → tactic (list import_data)
+-- | (d :: l) :=
+-- let fn_string := import_to_file env.get_mathlib_dir fname in
+-- aa l >>= (
+--   if (env.decl_olean d.to_name = fn_string) then
+--  (do
+--   of ← mk_data env file_to_import fname d,
+--     ((::) of ))
+--     else
+--  id)
+-- | [] := pure []
 /-- Creates an import data tuple for every declaration in file `fname`. -/
 meta def get_file_data (env : environment) (fname : name) (file_to_import : string → name) :
   tactic $ list import_data :=
 let fn_string := import_to_file env.get_mathlib_dir fname in
+-- env.get_decls.mmap_filter
+-- aa env fname file_to_import env.get_decls
+-- (λ decls : list declaration, do d ← decls,
+--   guardb (env.decl_olean d.to_name = fn_string) >>
+--   mk_data env file_to_import fname d,
+--   skip
+-- ) env.get_decls
+  -- (λ d : declaration, env.decl_olean d.to_name = fn_string)).mmap
+    -- (mk_data env file_to_import fname)
 (env.get_decls.filter
   (λ d : declaration, env.decl_olean d.to_name = fn_string)).mmap
-    (mk_data env file_to_import)
+    (mk_data env file_to_import fname)
 
 -- /-- Given a declaration return a structure of its name, position, list of dependent decl names and
 --     filename. -/
@@ -407,13 +429,13 @@ sformat!"# {oli} → {nei} {ol}\n" ++
 {imps}
 d}' src/{fn}.lean\n"
 
--- set_option profiler true
+set_option profiler true
 run_cmd unsafe_run_io (do
   e ← run_tactic get_env,
-  -- let L := [`data.sym.basic],
-  let L := [`tactic.basic],
+  let L := [`data.sym.basic],
+  -- let L := [`tactic.basic],
   -- let L := [`linear_algebra.affine_space.basic],
-  let L := [`linear_algebra.matrix.determinant],
+  -- let L := [`linear_algebra.matrix.determinant],
   fdata ← run_tactic $ get_file_data e L.head (mk_file_to_import e),
   -- print_ln fdata,
   G ← get_import_dag e L,
