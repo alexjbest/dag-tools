@@ -20,28 +20,46 @@ open tactic declaration environment io io.fs (put_str_ln close)
     source to point to, also they can never not be imported. -/
 def magic_homeless_decls := [`quot, `quot.mk, `quot.lift, `quot.ind]
 
-def list_attrs : list name :=
+/-- These are user attributes that we can use to check for imports not obvious from the final
+    proof term, i.e.
+    ```
+    @[ext]
+    structure blah := (n : ℕ)
+    ```
+    will produce a lemma `blah.ext` that doesn't contain any references to the file where the `ext`
+    attribute is defined, nevertheless by looking up the place where the user attribute is defined
+    we can track the dependency on that file.
+
+    Putting every possible attribute in this list would be too slow so we restrict to a hand-crafted
+    list we found useful.
+    -/
+def evidence_attrs : list name :=
 -- [`_can_lift, `_ext_core, `_ext_lemma_core, `_localized, `_refl_lemma, `_simp.sizeof, `_simp_cache, `_simps_str, `_squeeze_loc, `algebra, `alias, `ancestor, `breakpoint, `class, `congr, `continuity, `derive, `derive_handle, `elab_as_eliminator, `elab_simple, `elab_strategy, `elab_with_expected_type, `elementwise, `ematch, `ematch_lhs, `equiv_rw_simp, `ext, `field_simps, `functor_norm, `ghost_simps, `higher_order, `hint_tactic, `hole_command, `inline, `instance, `integral_simps, `interactive, `intro, `inverse, `irreducible, `is_poly, `library_note, `linter, `main_declaration, `measurability, `mfld_simps, `mk_iff, `monad_norm, `mono, `monotonicity, `no_inst_pattern, `no_rsimp, `nolint, `nontriviality, `norm, `norm_cast, `norm_num, `notation_class, `obviously, `parity_simps, `parsing_only, `pattern, `pp_nodot, `pp_using_anonymous_constructor, `pre_smt, `protect_proj, `protected, `push_cast, `reassoc, `recursor, `reducibility, `reducible, `refl, `replaceable, `rewrite, `rsimp, `semireducible, `simp, `simps, `split_if_reduction, `subst, `sugar, `sugar_nat, `symm, `tactic_doc, `tidy, `to_additive, `to_additive_aux, `to_additive_ignore_args, `to_additive_relevant_arg, `to_additive_reorder, `trans, `transport_simps, `typevec, `unify, `user_attribute, `user_command, `user_notation, `vm_monitor, `vm_override, `wrapper_eq, `zify]
 -- [`_ext_core, `_ext_lemma_core, `alias, `ancestor, `congr, `continuity, `elementwise, `ematch, `equiv_rw_simp, `ext, `field_simps, `functor_norm, `ghost_simps, `higher_order, `integral_simps, `interactive, `intro, `inverse, `irreducible, `is_poly, `library_note, `linter, `main_declaration, `measurability, `mfld_simps, `mk_iff, `monad_norm, `mono, `monotonicity, `no_inst_pattern, `no_rsimp, `nolint, `nontriviality, `norm, `norm_cast, `norm_num, `notation_class, `obviously, `parity_simps, `pattern, `pp_nodot, `protect_proj, `protected, `push_cast, `reassoc, `recursor, `reducibility, `reducible, `refl, `replaceable, `rewrite, `rsimp, `semireducible, `simp, `simps, `split_if_reduction, `subst, `symm, `tactic_doc, `tidy, `to_additive, `trans, `transport_simps, `unify, `user_attribute, `user_command, `zify]
-[`ext, `simps, `continuity, `mono,
-  `_localized, -- sadly this only makes files that depend on localized not remove, TODO localized still
-  `nolint,
-  `to_additive,
-  `protect_proj,
-  `linter,
-  `higher_order, -- TODO double check
-  `derive_handler, -- TODO double check
-  `deriver, -- TODO double check
-  `hint_tactic,
-  `obviously,
-  `ancestor,
-  `norm_cast,
-  `nontriviality,
-  `mk_iff
-  ]
+[`ext,
+ `simps,
+ `continuity,
+ `mono,
+ `_localized, -- sadly this only makes files that depend on localized not remove, TODO localized still
+ `nolint,
+ `to_additive,
+ `protect_proj,
+ `linter,
+ `higher_order, -- TODO double check
+ `derive_handler, -- TODO double check
+ `deriver, -- TODO double check
+ `hint_tactic,
+ `obviously,
+ `ancestor,
+ `norm_cast,
+ `nontriviality,
+ `mk_iff,
+ `tidy
+ ]
 -- TODO map to get prios also
-meta def get_decl_attrs (decna : name) : tactic $ list name :=
-list_attrs.mfilter (λ ana, do (tactic.has_attribute ana decna >> return tt) <|> return ff)
+/-- get the attributes on a decl that tell us about necessary imports. -/
+meta def get_decl_evidence_attrs (decna : name) : tactic $ list name :=
+evidence_attrs.mfilter (λ ana, do (tactic.has_attribute ana decna >> return tt) <|> return ff)
 
 /-- pre should have a slash at the end -/
 def import_to_file (pre : string) (im : name) : string :=
@@ -119,7 +137,7 @@ meta instance : has_to_tactic_format import_data :=
 
 meta def get_attr_deps (n : name) : tactic (list name) :=
 do
-  ll ← get_decl_attrs n,
+  ll ← get_decl_evidence_attrs n,
   list.mmap_filter (λ n, do (option.some <$> get_user_attribute_name n) <|> return none) ll
   -- o ←  ll.mmap_filter (λ ana, pure $ get_user_attribute_name ana),
   -- return o
@@ -368,35 +386,34 @@ meta def optimize_imports (e : environment) (nam : name) (G : dag name) (Gr := G
   let new_imp := get_minimal_imports e nam G Gr fdata,
       old_imp := G.find nam in
   (nam,
-   old_imp.map name.to_string,
+   (old_imp.map name.to_string).qsort (λ a b, a < b : string → string → bool),
    (new_imp.keys.map to_string).qsort (λ a b, a < b : string → string → bool),
    G.count_descendents (old_imp : list name),
    G.count_descendents (new_imp.keys : list name))
 
--- https://unix.stackexchange.com/questions/342516/sed-remove-all-matches-in-the-file-and-insert-some-lines-where-the-first-match
--- Note:
--- This clobbers import comments
--- Mac should use gsed
--- This pipes to stdout, use -i for in-place
+/-- Convert the output of `optimize_imports` into a sed script for removing these imports. Note:
+  * This clobbers import comments
+  * Mac users should replace `sed` with `gsed` (via homebrew) in the script to ensure it works
+  * This pipes to stdout by default, append `-i` after every `sed` to replace in-place
+-/
 def output_to_sed (o : name × list string × list string × ℕ × ℕ) : string :=
 let ⟨na, ol, ne, oli, nei⟩ := o,
     fn := na.to_string_with_sep "/",
+    -- https://unix.stackexchange.com/questions/342516/sed-remove-all-matches-in-the-file-and-insert-some-lines-where-the-first-match
     imps := "\\\n".intercalate $ ne.map (λ i, sformat!"import {i}") in
-sformat!"# {oli} -> {nei} {ol}\n" ++
+sformat!"# {oli} → {nei} {ol}\n" ++
+(if oli = nei then "# only transitive imports removed\n" else "") ++
 "sed '/^import /{x;//!c\\" ++ sformat!"
 {imps}
 d}' src/{fn}.lean\n"
-
---   >>= list.mmap tactic.get_user_attribute_name ,
--- skip
--- tactic.get_attributes `logic.nontrivial
 
 -- set_option profiler true
 run_cmd unsafe_run_io (do
   e ← run_tactic get_env,
   -- let L := [`data.sym.basic],
-  let L := [`logic.relation],
+  let L := [`tactic.basic],
   -- let L := [`linear_algebra.affine_space.basic],
+  let L := [`linear_algebra.matrix.determinant],
   fdata ← run_tactic $ get_file_data e L.head (mk_file_to_import e),
   -- print_ln fdata,
   G ← get_import_dag e L,
@@ -408,7 +425,7 @@ run_cmd unsafe_run_io (do
   let Gr := G.reachable_table,
   let T := L.map (λ nam, optimize_imports e nam G Gr fdata),
   -- print_ln T,
-  ((T.filter (λ R : name × list string × list string × ℕ × ℕ, R.2.2.2.1 > R.2.2.2.2)).map
+  ((T.filter (λ R : name × list string × list string × ℕ × ℕ, R.2.2.1 ≠ R.2.1 ∧ R.2.2.2.2 ≠ 0)).map
     output_to_sed).mmap print_ln)
 
 -- run_cmd silly `group_theory.free_abelian_group
@@ -436,42 +453,31 @@ open io io.fs native tactic
 meta def main : io unit :=
 do
   e ← run_tactic get_env,
-  G ← get_import_dag e [`algebra.char_p.quotient],
+  G ← get_import_dag e [`logic.relation],--[`algebra.char_p.quotient],
   print_ln G.keys,
   let Gr := G.reachable_table,
   print_ln sformat!"running on {G.keys.length} files",
   s ← run_tactic read,
-  let res := G.keys.map_async_chunked (λ na,
-        match
-    (unsafe_run_io $
-    do
-      b ← is_default e na,
-      b2 ← file_is_in_mathlib e na,
-      guardb ((¬ b) ∧ b2) >>
-      (do
-      fdata ← run_tactic $ get_file_data e na (mk_file_to_import e),
-      let T := optimize_imports e na G Gr fdata,
-      if T.2.2.2.1 > T.2.2.2.2 then
-        return $ output_to_sed T
-      else return "") <|> return "") s
-        with
-      | result.success w _ := w
-      | result.exception msg _ _ :=
-        "LINTER FAILED:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ()) -- TODO
-      end) 64,
-    -- b ← mk_file_dep_counts e na,
-    -- -- io.print "hi",
-    -- io.print ("\n" ++ na.to_string ++" >>> \n" ++ to_string (b.to_list.qsort (λ q w : name × ℕ, w.snd < q.snd)) ++ "\n"),
-    -- guardb (¬ 0 ∈ b.to_list.map (prod.snd)) <|> (do
-    --   io.print "##### some zeroes\n",
-    --   io.print "ok and nok imps\n",
-    --   let okimps := (G.find na).filter (λ de, ¬((de, 0) ∈ b.to_list)),
-    --   io.print okimps,
-    --   let nokimps := (G.find na).filter (λ de, ((de, 0) ∈ b.to_list)),
-    --   io.print nokimps,
-    --   io.print "\nall rems\n",
-    --   io.print $ G.vertices.filter (λ v, ¬ (v, 0) ∈ b.to_list)
-    -- let o := res.foldl ("\n" ++),
+  let res := G.keys.map_async_chunked (λ na, match
+      (unsafe_run_io $ do
+        b ← is_default e na, -- we skip default files
+        b2 ← file_is_in_mathlib e na, -- we only work on mathlib itself (TODO allow other projects)
+        guardb ((¬ b) ∧ b2) >>
+        (do
+        fdata ← run_tactic $ get_file_data e na (mk_file_to_import e),
+        let T := optimize_imports e na G Gr fdata,
+        if T.2.2.1 ≠ T.2.1 -- new imports not the same as old in any way
+           ∧ T.2.2.2.2 ≠ 0 -- Any file that ends up with no imports is surely a default-style
+                           -- special case, e.g. `tactic.basic`
+        then
+          return $ output_to_sed T
+        else return "") <|> return "") s
+      with
+        | result.success w _ := w
+        | result.exception msg _ _ :=
+          "File splitter failed:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ())
+      end)
+    64, -- chunk size
     print_ln $ "".intercalate res
 
--- run_cmd unsafe_run_io main
+run_cmd unsafe_run_io main
