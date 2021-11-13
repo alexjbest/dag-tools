@@ -339,7 +339,7 @@ let G := mk_file_dag_of_file_data fdata,
     if ¬ (`init).is_prefix_of imp then
       o2.incr_by imp d
     else
-      o2) o)).erase fname -- erase the file itself as most likeyl it will depend on itself
+      o2) o)).erase fname -- erase the file itself as most likely it will depend on itself
 
 /-- parse a files imports by reading the first few lines of the file.
   Note this function is quite brittle, some examples of things that probably break it but are valid
@@ -438,7 +438,11 @@ meta def mk_file_dep_counts (env : environment) (fname : name) (Gr : rb_map name
   (fdata : list import_data) :
   rb_counter name :=
 let file_to_import := mk_file_to_import env,
-    dc := mk_file_dep_counts_basic env fname file_to_import fdata in
+    dcb := mk_file_dep_counts_basic env fname file_to_import fdata,
+    -- now we copy accross only those deps which were transitive imports of the original, to prevent
+    -- spurious deps being added
+    dc : rb_counter name := (Gr.ifind fname).fold mk_rb_map (λ dn acc, acc.insert dn $ dcb.zfind dn)
+     in
   (dc.fold dc
     (λ nam co acc, (Gr.ifind nam).fold acc (λ de acc', acc'.incr_by de $ dc.zfind nam))).erase fname
   -- return $ (Gr.fold dc (λ na ln odc, ln.fold odc (λ de odc', odc'.incr_by de ((dc.find na).get_or_else 0)))).erase fname
@@ -484,10 +488,11 @@ sformat!"# {oli} → {nei} {ol}\n" ++
 {imps}
 d}' src/{fn}.lean\n"
 
-set_option profiler true
+-- set_option profiler true
 run_cmd unsafe_run_io (do
   e ← run_tactic get_env,
-  let L := [`data.sym.basic],
+  -- let L := [`data.sym.basic],
+  let L := [`data.list.defs],
   -- let L := [`tactic.basic],
   -- let L := [`linear_algebra.affine_space.basic],
   -- let L := [`linear_algebra.matrix.determinant],
