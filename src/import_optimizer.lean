@@ -120,7 +120,7 @@ since it is expensive to execute `get_mathlib_dir` many times. -/
 meta def environment.is_in_mathlib (e : environment) (n : name) : bool :=
 e.is_prefix_of_file e.get_mathlib_dir n
 
-
+@[derive inhabited]
 structure import_data : Type :=
 (decl_name : name)
 (file_name : name)
@@ -172,7 +172,7 @@ do
     on `decl`, that means that `decl` may originally have been defined without all of the
     dependent declarations returned by this function imported, and it may be necessary to prune this
     list.  -/
-meta def mk_data (env : environment) (file_to_import : string → name) (fname : name)
+meta def mk_data (env : environment) (fname : name)
   (decl : declaration) : tactic import_data :=
 let na := decl.to_name,
     po := env.decl_pos na
@@ -199,7 +199,7 @@ let na := decl.to_name,
 --  id)
 -- | [] := pure []
 /-- Creates an import data tuple for every declaration in file `fname`. -/
-meta def get_file_data (env : environment) (fname : name) (file_to_import : string → name) :
+meta def get_file_data (env : environment) (fname : name) :
   tactic $ list import_data :=
 let fn_string := import_to_file env.get_mathlib_dir fname in
 -- aa env fname file_to_import env.get_decls
@@ -212,7 +212,7 @@ let fn_string := import_to_file env.get_mathlib_dir fname in
     -- (mk_data env file_to_import fname)
 (env.get_decls.filter
   (λ d : declaration, env.decl_olean d.to_name = fn_string)).mmap
-    (mk_data env file_to_import fname)
+    (mk_data env fname)
 
 -- /-- Given a declaration return a structure of its name, position, list of dependent decl names and
 --     filename. -/
@@ -233,7 +233,7 @@ let fn_string := import_to_file env.get_mathlib_dir fname in
 -- let fn_string := import_to_file env.get_mathlib_dir fname in
 -- env.get_decls.mmap_filter (λ d, let na := d.to_name in if
 --   env.decl_olean na = fn_string then
---     option.some <$> mk_data env file_to_import d na else none)
+--     option.some <$> mk_data env d na else none)
 
 /-- Creates a dag of input data. -/
 meta def mk_file_dag_of_file_data (fdata : list import_data) :
@@ -280,9 +280,11 @@ open native
 --         else
 --           dfs_all_paths' w stavis')
 --       (stavis.fst, stavis.snd.insert v))
+
+-- TODO convert this to use the `dfs` function
 /-- Depth first search all paths. -/
-meta def dfs_all_paths {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)] [decidable_eq T]
-  (d : dag T) (tgt : T) : T → rb_lmap T (list T) → rb_lmap T (list T)
+meta def dfs_all_paths {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)]
+  (d : dag T) : T → rb_lmap T (list T) → rb_lmap T (list T)
 | v paths :=
   if paths.contains v then paths else
     let npaths := (d.find v).foldl (λ opaths de, dfs_all_paths de opaths) paths in
@@ -306,17 +308,20 @@ meta def dfs_all_paths {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → 
       --   n.insert v $ (((n.find v).get_or_else mk_rb_set).union $ (n.find w).get_or_else mk_rb_set))
       -- rea) in a.insert v $ ((a.find v).get_or_else mk_rb_set).insert v
 
-meta def dag.all_paths {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)] [decidable_eq T]
+-- TODO convert this to use the `dfs` function
+/-- Find all paths from `src` to `target` in the dag, not used currently but helpful for debugging-/
+meta def dag.all_paths {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)]
   (d : dag T) (src tgt : T) : list (list T) :=
-(dfs_all_paths d tgt src $ (mk_rb_map).insert tgt [[tgt]]).find src
+(dfs_all_paths d src $ (mk_rb_map).insert tgt [[tgt]]).find src
+
 -- #eval all_paths ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5), (5,6),(5,8),(8,7),(8,6), (5,19),(19,7), (6,7)]) 1 7
 
-meta def dag.count_descendents {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)] [decidable_eq T]
-  (d : dag T) (start : list T) : ℕ :=
+meta def dag.count_descendents {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)]
+  [decidable_eq T] (d : dag T) (start : list T) : ℕ :=
 d.dfs (λ _, nat.succ) 0 start
 
-meta def dag.count_all_descendents {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)] [decidable_eq T]
-  (d : dag T) (start : list T := d.vertices) : rb_counter T :=
+meta def dag.count_all_descendents {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)]
+  [decidable_eq T] (d : dag T) (start : list T := d.vertices) : rb_counter T :=
 d.dfs (λ v acc, acc.insert v $ 1 + ((d.find v).map $ λ de, acc.zfind de).sum) mk_rb_map start
 -- #eval count_descendents (((dag.mk ℕ).insert_vertex 3).insert_edges [(1, 5), (4,5), (2,5)]) ([1,4,3])
 
@@ -336,6 +341,16 @@ let G := mk_file_dag_of_file_data fdata,
     else
       o2) o)).erase fname -- erase the file itself as most likeyl it will depend on itself
 
+/-- parse a files imports by reading the first few lines of the file.
+  Note this function is quite brittle, some examples of things that probably break it but are valid
+  lean.
+```
+  /-hi-/ import tactic
+  import algebra.add_torsor
+-- asddd
+import data.list.basic
+```
+  -/
 meta def get_imports_aux : handle → bool → io (list name)
 | f b :=
 do
@@ -344,13 +359,14 @@ do
   else do
     l ← f.get_line_as_string,
     let ls := l.split_on ' ',
-    -- if ls.tail.head = "graph." hen return [] else -- stupid hack around reserved notation
+    -- if ls.tail.head = "graph." hen return [] else --stupid hack around the file reserved notation
     (if ls.head = "import" then
       do a ← get_imports_aux f tt,
         return ((((ls.tail.split_on_p (λ s, "--".is_prefix_of s)).head.filter (≠ "")).map
           name.from_string).map name.remove_default ++ a) -- space separated lists on imports (in core)
     else
-      -- if we are either
+      -- stop parsing imports if we see a non-newline line after seeing an import already
+      -- or if we see a module docstring header
       if (b ∧ l ≠ "\n") ∨ "/-!".is_prefix_of l then
         return []
       else
@@ -402,23 +418,27 @@ meta def get_import_dag (e : environment) (files : list name) : io (dag name) :=
 files.mfoldl (λ ol file, get_dag_aux e file ol) (dag.mk _)
 
 open native
-/-- pre should have a slash at the end -/
+/-- Given an environment creates a function `file_to_import` that translates a filename into an
+    import `name`.
+    We remove `default` by default.
+    E.g. this will send
+    `/users/alex/mathlib/src/group_theory/subgroup/default.lean` to `group_theory.subgroup`. -/
 meta def mk_file_to_import (e : environment) : string → name :=
 let mathlib_pre := e.get_mathlib_dir,
     core_pre := e.get_core_dir in
 λ file,
-let rest := (file.get_rest mathlib_pre).get_or_else $
-            (file.get_rest core_pre).get_or_else
-           sformat!"Hello, I'm {file} trapped in an error string, please let me out" in
-  (name.from_components ((rest.popn_back 5).split_on '/')).remove_default
+  let rest := (file.get_rest mathlib_pre).get_or_else $ -- take off the mathlib or core prefix
+              (file.get_rest core_pre).get_or_else
+              sformat!"Hello, I'm {file} trapped in an error string, please let me out" in
+  (name.from_components -- create the name from the suffix
+    ((rest.popn_back 5 -- remove the `.lean` suffix
+      ).split_on '/')).remove_default
 
 meta def mk_file_dep_counts (env : environment) (fname : name) (Gr : rb_map name (rb_set name))
   (fdata : list import_data) :
   rb_counter name :=
 let file_to_import := mk_file_to_import env,
     dc := mk_file_dep_counts_basic env fname file_to_import fdata in
-  -- io.put_str (to_fmt dc).to_string, -- another beautiful hack
-  -- G ← get_import_dag env fname,
   (dc.fold dc
     (λ nam co acc, (Gr.ifind nam).fold acc (λ de acc', acc'.incr_by de $ dc.zfind nam))).erase fname
   -- return $ (Gr.fold dc (λ na ln odc, ln.fold odc (λ de odc', odc'.incr_by de ((dc.find na).get_or_else 0)))).erase fname
@@ -429,15 +449,13 @@ let file_to_import := mk_file_to_import env,
 --   trace (all_paths G `data.int.cast `data.equiv.basic),
   -- skip)
 meta def get_minimal_imports (e : environment) (n : name) (G : dag name) (Gr := G.reachable_table)
-  (fdata : list import_data) (robust : bool := tt) :
+  (fdata : list import_data) (robust : bool := ff) :
   rb_set name :=
-  -- let n := `ring_theory.discrete_valuation_ring,
-  -- let n := `algebra.lie.classical,
   let b := mk_file_dep_counts e n Gr fdata in
   G.minimal_vertices $
     (b.keys.filter (λ k, b.find k ≠ some 0)).union $ -- the needed imports
-    ((Gr.find n).iget).to_list.filter -- if "robust" add some extra original imports back so we never remove tactic
-      (λ dn, robust ∧ dn ≠ n ∧ (`tactic).is_prefix_of dn)
+      ((Gr.find n).iget).to_list.filter -- if "robust" add some extra original imports back so we never remove tactic
+        (λ dn, robust ∧ dn ≠ n ∧ (`tactic).is_prefix_of dn)
 
 meta def optimize_imports (e : environment) (nam : name) (G : dag name) (Gr := G.reachable_table)
   (fdata : list import_data) :
@@ -473,7 +491,7 @@ run_cmd unsafe_run_io (do
   -- let L := [`tactic.basic],
   -- let L := [`linear_algebra.affine_space.basic],
   -- let L := [`linear_algebra.matrix.determinant],
-  fdata ← run_tactic $ get_file_data e L.head (mk_file_to_import e),
+  fdata ← run_tactic $ get_file_data e L.head,
   -- print_ln fdata,
   G ← get_import_dag e L,
   -- print_ln (to_fmt G),
@@ -517,26 +535,31 @@ do
   let Gr := G.reachable_table,
   print_ln sformat!"running on {G.keys.length} files",
   s ← run_tactic read,
-  let res := G.keys.map_async_chunked (λ na, match
+  let res := G.keys.map_async_chunked (λ na,
+    match
       (unsafe_run_io $ do
         b ← is_default e na, -- we skip default files
         b2 ← file_is_in_mathlib e na, -- we only work on mathlib itself (TODO allow other projects)
-        guardb ((¬ b) ∧ b2) >>
+        guardb (b2 ∧ ¬ b) >>
         (do
-        fdata ← run_tactic $ get_file_data e na (mk_file_to_import e),
-        let T := optimize_imports e na G Gr fdata,
-        if T.2.2.1 ≠ T.2.1 -- new imports not the same as old in any way
-           ∧ T.2.2.2.2 ≠ 0 -- Any file that ends up with no imports is surely a default-style
-                           -- special case, e.g. `tactic.basic`
-        then
-          return $ output_to_sed T
-        else return "") <|> return "") s
-      with
-        | result.success w _ := w
-        | result.exception msg _ _ :=
-          "File splitter failed:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ())
-      end)
+          fdata ← run_tactic $ get_file_data e na,
+          -- here we should filter fdata to remove stuff it cannot actually depend on
+
+          let T := optimize_imports e na G Gr fdata,
+          if T.2.2.1 ≠ T.2.1 -- new imports not the same as old in any way
+            ∧ T.2.2.2.2 ≠ 0 -- Any file that ends up with no imports is surely a default-style
+                            -- special case, e.g. `tactic.basic`
+          then
+            return $ output_to_sed T
+          else return "") <|> return "")
+      s
+    with
+      | result.success w _ := w
+      | result.exception msg _ _ :=
+        "File splitter failed:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ())
+    end)
     16, -- chunk size
-    print_ln $ "".intercalate res
+  print_ln $ "".intercalate res
 
 -- run_cmd unsafe_run_io main
+#lint
