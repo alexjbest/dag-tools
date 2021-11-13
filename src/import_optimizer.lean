@@ -13,8 +13,22 @@ import system.io
 import init.meta.widget.tactic_component
 import data.list.lex
 
+/-!
+Notes:
+
+* Sometimes files need changing beyond their imports, this can either be a insufficiency of this
+  code or a weirdness in the file being modified, here are some ways this can happen:
+  - The file being modified opens a namespace but never uses it, this will fail when the import is
+    removed, but it wasn't doing anything in the first place, solution: delete the `open blah`
+  - The file being modified applies simp with some attribute but then so simp lemmas with that
+    attribute are applied so the dependency is missed, solution change to another or no simp set.
+  - The file being modified uses notation but only notation from another file, solution, ignore it
+    or move the notation next to the defs it refers to.
+
+-/
 
 section generic_io_stuff
+set_option pp.all true
 
 /-- Remove a trailing newline character from a `list char` (if there is one) -/
 meta def remove_trail : list char → list char
@@ -314,6 +328,12 @@ meta def dag.all_paths {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → 
   (d : dag T) (src tgt : T) : list (list T) :=
 (dfs_all_paths d src $ (mk_rb_map).insert tgt [[tgt]]).find src
 
+-- run_cmd (do
+--   e ← get_env,
+--   G ← unsafe_run_io $ get_import_dag e `algebra.group_power.lemmas,
+--   trace (all_paths G `data.int.cast `data.equiv.basic),
+  -- skip)
+
 -- #eval all_paths ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5), (5,6),(5,8),(8,7),(8,6), (5,19),(19,7), (6,7)]) 1 7
 
 meta def dag.count_descendents {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)]
@@ -447,13 +467,8 @@ let file_to_import := mk_file_to_import env,
     (λ nam co acc, (Gr.ifind nam).fold acc (λ de acc', acc'.incr_by de $ dc.zfind nam))).erase fname
   -- return $ (Gr.fold dc (λ na ln odc, ln.fold odc (λ de odc', odc'.incr_by de ((dc.find na).get_or_else 0)))).erase fname
 
--- run_cmd (do
---   e ← get_env,
---   G ← unsafe_run_io $ get_import_dag e `algebra.group_power.lemmas,
---   trace (all_paths G `data.int.cast `data.equiv.basic),
-  -- skip)
 meta def get_minimal_imports (e : environment) (n : name) (G : dag name) (Gr := G.reachable_table)
-  (fdata : list import_data) (robust : bool := ff) :
+  (fdata : list import_data) (robust : bool := tt) :
   rb_set name :=
   let b := mk_file_dep_counts e n Gr fdata in
   G.minimal_vertices $
@@ -489,26 +504,26 @@ sformat!"# {oli} → {nei} {ol}\n" ++
 d}' src/{fn}.lean\n"
 
 -- set_option profiler true
-run_cmd unsafe_run_io (do
-  e ← run_tactic get_env,
-  -- let L := [`data.sym.basic],
-  -- let L := [`data.list.defs],
-  let L := [`tactic.basic],
-  -- let L := [`linear_algebra.affine_space.basic],
-  -- let L := [`linear_algebra.matrix.determinant],
-  fdata ← run_tactic $ get_file_data e L.head,
-  -- print_ln fdata,
-  G ← get_import_dag e L,
-  -- print_ln (to_fmt G),
-  -- let file_to_import := mk_file_to_import e,
-  -- let G' := mk_file_dag e `algebra.group_with_zero.basic file_to_import,
-  -- print_ln G'.keys,
-  -- print_ln $to_fmt G,
-  let Gr := G.reachable_table,
-  let T := L.map (λ nam, optimize_imports e nam G Gr fdata),
-  -- print_ln T,
-  ((T.filter (λ R : name × list string × list string × ℕ × ℕ, R.2.2.1 ≠ R.2.1 ∧ R.2.2.2.2 ≠ 0)).map
-    output_to_sed).mmap print_ln)
+-- run_cmd unsafe_run_io (do
+--   e ← run_tactic get_env,
+--   -- let L := [`data.sym.basic],
+--   -- let L := [`data.list.defs],
+--   let L := [`tactic.basic],
+--   -- let L := [`linear_algebra.affine_space.basic],
+--   -- let L := [`linear_algebra.matrix.determinant],
+--   fdata ← run_tactic $ get_file_data e L.head,
+--   -- print_ln fdata,
+--   G ← get_import_dag e L,
+--   -- print_ln (to_fmt G),
+--   -- let file_to_import := mk_file_to_import e,
+--   -- let G' := mk_file_dag e `algebra.group_with_zero.basic file_to_import,
+--   -- print_ln G'.keys,
+--   -- print_ln $to_fmt G,
+--   let Gr := G.reachable_table,
+--   let T := L.map (λ nam, optimize_imports e nam G Gr fdata),
+--   -- print_ln T,
+--   ((T.filter (λ R : name × list string × list string × ℕ × ℕ, R.2.2.1 ≠ R.2.1 ∧ R.2.2.2.2 ≠ 0)).map
+--     output_to_sed).mmap print_ln)
 
 -- run_cmd silly `group_theory.free_abelian_group
 -- run_cmd silly `algebra.module.linear_map -- quite successful
@@ -563,7 +578,7 @@ do
       | result.exception msg _ _ :=
         "File splitter failed:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ())
     end)
-    2, -- chunk size
+    8, -- chunk size
   print_ln $ "".intercalate res
 
 -- run_cmd unsafe_run_io main
