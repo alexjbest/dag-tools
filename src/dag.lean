@@ -1,5 +1,6 @@
+import tactic.lint
 import meta.rb_map
-variables (T : Type) [has_lt T] [decidable_rel ((<) : T → T → Prop)]
+variables (T : Type)
 meta def dag : Type := native.rb_lmap T T
 -- TODO remove has_to_strings that were only needed for tracing
 
@@ -10,7 +11,7 @@ namespace dag
 --  expr.mk_app `(native.rb_map.of_list) (list.reflect ((native.rb_map.fold ns [] (λ a b o, (a, b) :: o)))
 -- `(id %%(expr.mk_app `(Prop) $ ns.map (flip expr.const [])) : dag T)
 
-meta def mk : dag T := native.rb_lmap.mk T T
+meta def mk  [has_lt T] [decidable_rel ((<) : T → T → Prop)] : dag T := native.rb_lmap.mk T T
 variable {T}
 meta def insert_vertex (d : dag T) (a : T) : dag T :=
 if ¬ native.rb_map.contains d a then
@@ -18,14 +19,17 @@ if ¬ native.rb_map.contains d a then
 else
   d
 meta def insert_vertices (d : dag T) (a : list T) : dag T := a.foldl insert_vertex d
-variable [decidable_eq T]
-meta def insert_edge (d : dag T) (v w : T) : dag T := if w ∈ d.find v then d else insert_vertex (native.rb_lmap.insert d v w) w
-meta def insert_edges (d : dag T) (a : list (T × T)) : dag T := a.foldl (λ da ⟨v, w⟩, insert_edge da v w) d
 meta def vertices : dag T → list T := native.rb_map.keys
 meta def edges (d : dag T) : list (T × T) := native.rb_map.fold d []
   (λ v es old, old ++ es.map (λ x, (v, x)))
-meta def erase_all (d : dag T) (l : list T) : dag T := l.foldl (λ o v, native.rb_map.fold (native.rb_map.erase o v) (native.rb_map.erase o v) (λ w ll oll, native.rb_map.insert oll w (ll.erase v))) d
 meta def num_edges (d : dag T) : ℕ := d.fold 0 (λ _ l o, o + l.length)
+
+section dec_eq
+variable [decidable_eq T]
+meta def insert_edge (d : dag T) (v w : T) : dag T := if w ∈ d.find v then d else insert_vertex (native.rb_lmap.insert d v w) w
+meta def insert_edges (d : dag T) (a : list (T × T)) : dag T := a.foldl (λ da ⟨v, w⟩, insert_edge da v w) d
+meta def erase_all (d : dag T) (l : list T) : dag T := l.foldl (λ o v, native.rb_map.fold (native.rb_map.erase o v) (native.rb_map.erase o v) (λ w ll oll, native.rb_map.insert oll w (ll.erase v))) d
+end dec_eq
 
 section
 variables [has_to_format T]
@@ -63,12 +67,25 @@ meta def dfs_aux {α : Type} (d : dag T) (f : T → α → α) (g : T → T → 
 | v ⟨acc, seen⟩ :=
 let res : α × rb_set T :=
   (d.find v).foldl
-    (λ ⟨acc', seen'⟩ w, if seen'.contains w then ⟨g v w acc', seen'⟩ else dfs_aux w (acc', seen'))
-  (acc, (seen.insert v)) in
+    (λ ⟨acc', seen'⟩ w,
+      if seen'.contains w then
+        ⟨g v w acc', seen'⟩
+      else
+        dfs_aux w (acc', seen'))
+  (acc, seen.insert v) in
 res.map (f v) id
 
+variables [has_lt T] [decidable_rel ((<) : T → T → Prop)]
+
 /-- Depth first search used for alles.
-A very general
+A very general version of dfs.
+E.g.
+
+```
+#eval (((dag.mk ℕ).insert_edges [(1,2),(1,3),(2,4),(2,5), (3,6), (3,7)]).dfs
+  (λ n acc, acc ++ to_string n)
+  ""
+```
  -/
 meta def dfs {α : Type} (d : dag T) (f : T → α → α) (a : α) (start : list T := d.vertices) (g : T → T → α → α := λ _ _, id) : α :=
 (start.foldl (λ (acc : α × rb_set T) v, if acc.2.contains v then acc else d.dfs_aux f g v acc) (a, mk_rb_map)).fst
@@ -76,7 +93,6 @@ meta def dfs {α : Type} (d : dag T) (f : T → α → α) (a : α) (start : lis
 -- #eval (((dag.mk ℕ).insert_edges [(9,7),(3,7),(4,3),(4,9)]).dfs_aux
 --   (λ _ acc, acc ++ "")
 --   (λ pa ch acc, acc ++ _root_.to_string (pa,ch) ++ " forms part of an (undirected) cycle!\n") 4 ("", mk_rb_set)).fst
-
 
 -- TODO is this inefficient?
 /-- Take the sub-graph of things reachable from `v` -/
@@ -130,17 +146,22 @@ d.dfs (λ v acc, (d.find v).foldl (λ acc' de, acc'.erase de) (acc.insert v)) mk
 -- #eval (((dag.mk ℕ).insert_vertex 2).minimal_vertices $ [2]).to_list
 -- #eval (((dag.mk ℕ).insert_edges [(1,2)]).minimal_vertices $ [1,2]).to_list
 
-meta def merge_el (S : list (list T)) : option (list T) → option (list T) → list (list T)
+meta def merge_el [decidable_eq T] (S : list (list T)) :
+  option (list T) → option (list T) → list (list T)
 | none _ := S
 | _ none := S
 | (some u) (some v) := ((S.erase u).erase v).insert (u.union v)
-meta def merge (S : list (list T)) (u v : T) : list (list T) :=
+meta def merge [decidable_eq T] (S : list (list T)) (u v : T) : list (list T) :=
 merge_el S (S.find (λ s : list T, u ∈ s))
            (S.find (λ s : list T, v ∈ s))
 
+/-- Return a topological sort of the DAG. -/
+meta def topological_sort (d : dag T) (start : list T := d.vertices) : list T :=
+d.dfs (::) [] start
+
 variable [inhabited T]
 
-meta def minimal_vertices_components_dfs (d : dag T) (t : T) : T → rb_map T bool → rb_map T T
+meta def minimal_vertices_components_dfs [decidable_eq T] (d : dag T) (t : T) : T → rb_map T bool → rb_map T T
   → list (list T) → (rb_map T bool × rb_map T T × list (list T))
 | v minimals visited components :=
     ((d.find v).foldl
@@ -162,7 +183,7 @@ meta def minimal_vertices_components_dfs (d : dag T) (t : T) : T → rb_map T bo
 
 
 /-- Return the list of minimal vertices in a dag -/
-meta def minimal_vertices_with_components_aux (d : dag T) (start : native.rb_set T) :
+meta def minimal_vertices_with_components_aux [decidable_eq T] (d : dag T) (start : native.rb_set T) :
   native.rb_map T bool × native.rb_map T T × list (list T) :=
 start.fold
   ((-- minimal vertices
@@ -179,7 +200,7 @@ start.fold
     else
       minimal_vertices_components_dfs d v v minsviscomp.1 minsviscomp.2.1 minsviscomp.2.2)
 
-meta def minimal_vertices_with_components (d : dag T) (start : native.rb_set T) :
+meta def minimal_vertices_with_components [decidable_eq T] (d : dag T) (start : native.rb_set T) :
   rb_set T × list (list T) :=
 (λ ans : native.rb_map T bool × native.rb_map T T × list (list T),
   ((ans.fst.fold mk_rb_set (λ w b ol, if b && start.contains w then ol.insert w else ol),
@@ -187,10 +208,6 @@ meta def minimal_vertices_with_components (d : dag T) (start : native.rb_set T) 
 (minimal_vertices_with_components_aux d start)
 
 --#eval to_string ((((dag.mk ℕ).insert_vertex 3).insert_edges [(1, 5), (3, 2), (4,5), (2,5)]).minimal_vertices_with_components_aux (rb_set.of_list [1,3,4])).2.2
-
-/-- Return a topological sort of the DAG. -/
-meta def topological_sort (d : dag T) (start : list T := d.vertices) : list T :=
-d.dfs (::) [] start
 
   -- (native.rb_map.fold d
   --   (([] : list T), mk_rb_set)
@@ -259,19 +276,19 @@ S.foldl (λ (ol : bool) (w : T), ol && dreach.contains w) tt
 -- TODO this is hilariously inefficient
 --#eval ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5)]).is_reachable [] 3 3
 
-meta def meet [has_to_string T] (d : dag T) (ts : list T) (dr : rb_map T (rb_set T)) (S : list T) : T :=
+meta def meet [decidable_eq T] [has_to_string T] (d : dag T) (ts : list T) (dr : rb_map T (rb_set T)) (S : list T) : T :=
 -- trace (to_string ts)
 ((slice_up_to (∈ S) ts).reverse.find (λ v, d.all_reachable dr v S)).iget
 
-meta def meet' [has_to_string T] (d : dag T) (S : list T) : T := let ts := d.topological_sort in
+meta def meet' [decidable_eq T] [has_to_string T] (d : dag T) (S : list T) : T := let ts := d.topological_sort in
 -- trace (to_string ts)
 ((slice_up_to (∈ S) ts).reverse.find (λ v, d.all_reachable' ts v S)).iget
 
 --#eval ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5),(7,1),(7,3)]).meet [3,1]
-meta def meets_of_components [has_to_string T] (d : dag T) (ts : list T) (dr : rb_map T (rb_set T)) (start : native.rb_set T) :
+meta def meets_of_components [decidable_eq T] [has_to_string T] (d : dag T) (ts : list T) (dr : rb_map T (rb_set T)) (start : native.rb_set T) :
   native.rb_set T :=
 rb_set.of_list $ (d.minimal_vertices_with_components start).snd.map (λ S, d.meet ts dr S)
-meta def meets_of_components' [has_to_string T] (d : dag T) (start : native.rb_set T) :
+meta def meets_of_components' [decidable_eq T] [has_to_string T] (d : dag T) (start : native.rb_set T) :
   native.rb_set T :=
 rb_set.of_list $ (d.minimal_vertices_with_components start).snd.map (λ S, d.meet' S)
 --#eval rb_set.to_list $ ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5),(7,1),(7,3),(7,6), (6,8)]).meets_of_components
