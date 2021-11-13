@@ -563,7 +563,7 @@ do
       | result.exception msg _ _ :=
         "File splitter failed:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ())
     end)
-    16, -- chunk size
+    2, -- chunk size
   print_ln $ "".intercalate res
 
 -- run_cmd unsafe_run_io main
