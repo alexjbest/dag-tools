@@ -13,7 +13,23 @@ import system.io
 import init.meta.widget.tactic_component
 import data.list.lex
 
-local attribute [-instance] string_to_name
+
+section generic_io_stuff
+
+/-- Remove a trailing newline character from a `list char` (if there is one) -/
+meta def remove_trail : list char → list char
+| ['\n'] := []
+| (a :: b) := a :: remove_trail b
+| [] := []
+
+open io
+/-- read one line of the file `f` as a string -/
+meta def io.handle.get_line_as_string (f : handle) : io string :=
+do g ← fs.get_line f, return $ (remove_trail g.to_list).as_string
+
+end generic_io_stuff
+
+local attribute [-instance] string_to_name -- this tends to cause confusion
 open tactic declaration environment io io.fs (put_str_ln close)
 
 /-- These decls are special as they are magically defined in cpp and don't have a genuine lean file
@@ -61,32 +77,40 @@ def evidence_attrs : list name :=
 meta def get_decl_evidence_attrs (decna : name) : tactic $ list name :=
 evidence_attrs.mfilter (λ ana, do (tactic.has_attribute ana decna >> return tt) <|> return ff)
 
-/-- pre should have a slash at the end -/
+/-- Convert an import name like `data.list.defs` to a filename by appending a prefix `pre`.
+    `pre` should have a slash at the end, this does not check that a real file exists, so
+    if `foo.blah` refers to `/files/mathlib/src/foo/bar/default.lean` this will not be the right
+    filename. -/
 def import_to_file (pre : string) (im : name) : string :=
 pre ++ im.to_string_with_sep "/" ++ ".lean"-- TODO windows lol
 
 section
 open name
+/-- Remove default from the end of an (import) `name`. -/
 def name.remove_default : name → name
 | (mk_string "default" p) := p
-| p  := p
+| p := p
 end
 
 /-- A hackish way to get the `src` directory of any project.
   Requires as argument any declaration name `n` in that project, and `k`, the number of characters
   in the path of the file where `n` is declared not part of the `src` directory.
   Example: For `mathlib_dir_locator` this is the length of `tactic/project_dir.lean`, so `23`.
-  Note: does not work in the file where `n` is declared. -/
+  Note: does not work in the file where `n` is declared.
+  This is copied from mathlib but abstracts over the environment instead.
+   -/
 meta def environment.get_project_dir (e : environment) (n : name) (k : ℕ) : string :=
 (do
   s ← e.decl_olean n,
   return $ s.popn_back k).get_or_else sformat!"Hello! I'm {n} trapped in an error string, please let me out"
 
-/-- A hackish way to get the `src` directory of mathlib. -/
+/-- A hackish way to get the `src` directory of mathlib.
+    This is copied from mathlib but abstracts over the environment instead.  -/
 meta def environment.get_mathlib_dir (e : environment) : string :=
 e.get_project_dir `mathlib_dir_locator 23
 
-/-- A hackish way to get the `src` directory of core. -/
+/-- A hackish way to get the `src` directory of core.
+    This is copied from mathlib but abstracts over the environment instead.  -/
 meta def environment.get_core_dir (e : environment) : string :=
 e.get_project_dir `nat 14
 
@@ -138,12 +162,16 @@ meta instance : has_to_tactic_format import_data :=
 meta def get_attr_deps (n : name) : tactic (list name) :=
 do
   ll ← get_decl_evidence_attrs n,
-  list.mmap_filter (λ n, do (option.some <$> get_user_attribute_name n) <|> return none) ll
+  ll.mmap_filter (λ n, do (option.some <$> get_user_attribute_name n) <|> return none)
   -- o ←  ll.mmap_filter (λ ana, pure $ get_user_attribute_name ana),
   -- return o
 
-/-- Given a declaration return a structure of its name, position, list of dependent decl names and
-    filename. -/
+/-- Given a declaration `decl` return a structure of its name, position, list of dependent decl
+    names and filename.
+    Note that the dependent decl names includes the names of decls needed to declare the attributes
+    on `decl`, that means that `decl` may originally have been defined without all of the
+    dependent declarations returned by this function imported, and it may be necessary to prune this
+    list.  -/
 meta def mk_data (env : environment) (file_to_import : string → name) (fname : name)
   (decl : declaration) : tactic import_data :=
 let na := decl.to_name,
@@ -158,7 +186,7 @@ let na := decl.to_name,
         (list_items decl.type ++ list_items decl.value ++ attrd).erase_dup.diff magic_homeless_decls, }) <$>
   get_attr_deps na
 
-#eval (λ inp : list nat, do l ← inp, guardb (l = 1), pure l) [1,2]
+-- #eval (λ inp : list nat, do l ← inp, guardb (l = 1), pure l) [1,2]
 -- meta def aa (env : environment) (fname : name) (file_to_import : string → name) : list declaration → tactic (list import_data)
 -- | (d :: l) :=
 -- let fn_string := import_to_file env.get_mathlib_dir fname in
@@ -174,7 +202,6 @@ let na := decl.to_name,
 meta def get_file_data (env : environment) (fname : name) (file_to_import : string → name) :
   tactic $ list import_data :=
 let fn_string := import_to_file env.get_mathlib_dir fname in
--- env.get_decls.mmap_filter
 -- aa env fname file_to_import env.get_decls
 -- (λ decls : list declaration, do d ← decls,
 --   guardb (env.decl_olean d.to_name = fn_string) >>
@@ -293,26 +320,21 @@ meta def dag.count_all_descendents {T : Type*} [has_lt T] [decidable_rel ((<) : 
 d.dfs (λ v acc, acc.insert v $ 1 + ((d.find v).map $ λ de, acc.zfind de).sum) mk_rb_map start
 -- #eval count_descendents (((dag.mk ℕ).insert_vertex 3).insert_edges [(1, 5), (4,5), (2,5)]) ([1,4,3])
 
-open tactic
+open tactic native
 
-open native
+/-- -/
 meta def mk_file_dep_counts_basic (env : environment) (fname : name) (file_to_import : string → name)
   (fdata : list import_data) :
   rb_counter name :=
 let G := mk_file_dag_of_file_data fdata,
     Gr := G.count_all_descendents in
 (Gr.fold (rb_counter.mk _) (λ k d o, k.deps.foldl
-  (λ o2 dep, let imp := file_to_import $ file_name $ env.decl_olean dep in
+  (λ o2 dep,
+    let imp := file_to_import $ file_name $ env.decl_olean dep in
     if ¬ (`init).is_prefix_of imp then
       o2.incr_by imp d
-    else o2) o)).erase fname
-
-meta def remove_trail : list char → list char
-| ['\n'] := []
-| (a :: b) := a :: remove_trail b
-| [] := []
-meta def io.handle.get_line_as_string (f : handle) : io string :=
-do g ← fs.get_line f, return $ (remove_trail g.to_list).as_string
+    else
+      o2) o)).erase fname -- erase the file itself as most likeyl it will depend on itself
 
 meta def get_imports_aux : handle → bool → io (list name)
 | f b :=
@@ -336,6 +358,7 @@ do
 
 meta def get_imports (e : environment) (file : name) : io (list name) :=
 do
+  -- get the file handle by trying a bunch of possibilities in order
   f ← mk_file_handle (import_to_file e.get_mathlib_dir file) io.mode.read <|>
       mk_file_handle (import_to_file e.get_mathlib_dir $ file.append `default) io.mode.read <|>
       mk_file_handle (import_to_file e.get_core_dir file) io.mode.read <|>
@@ -344,16 +367,27 @@ do
   fs.close f,
   return l
 
+open io io.fs
+/-- Checks whether the import given by name `file` refers to a default file, this simply checks if
+    the corresponding filename with default appended appears in either mathlib or core.
+    Note that if default is already a prefix of the file this does the wrong thing.
+    We assume all default suffixes are stripped. TODO maybe change this
+     -/
 meta def is_default (e : environment) (file : name) : io bool :=
 do
-  ((mk_file_handle (import_to_file e.get_mathlib_dir file) io.mode.read >> return ff) <|>
-      (mk_file_handle (import_to_file (e.get_core_dir) file) io.mode.read >> return ff) <|> return tt)
+  bm ← file_exists $ import_to_file e.get_mathlib_dir $ file.append `default,
+  bc ← file_exists $ import_to_file e.get_core_dir $ file.append `default,
+  return $ bm ∨ bc
 
+/-- Checks whether the file whose import name is `file` is in the mathlib directory.
+    Compare `environment.is_in_mathlib` which checks if a declaration is in mathlib. -/
 meta def file_is_in_mathlib (e : environment) (file : name) : io bool :=
 do
-  ((mk_file_handle (import_to_file e.get_mathlib_dir file) io.mode.read >> return tt) <|>
-      (mk_file_handle (import_to_file e.get_mathlib_dir $ file.append `default) io.mode.read >> return tt) <|> return ff)
+  b ← file_exists $ import_to_file e.get_mathlib_dir $ file,
+  bd ← file_exists $ import_to_file e.get_mathlib_dir $ file.append `default,
+  return $ b ∨ bd
 
+/-- Auxiliary function to make the import dag. -/
 meta def get_dag_aux (e : environment) : name → dag name → io (dag name)
 | n d := do
 if d.contains n then return d else do
@@ -362,8 +396,8 @@ if d.contains n then return d else do
     G ← get_dag_aux im od,
     return $ G.insert_edge n im) d
 
-/-- get a dag of all file imports with edges
-   the environment is used to find the location of files -/
+/-- get a dag of all imports between files with edges from later dependencies to earlier.
+   the environment is used to find the location of files, to parse their imports -/
 meta def get_import_dag (e : environment) (files : list name) : io (dag name) :=
 files.mfoldl (λ ol file, get_dag_aux e file ol) (dag.mk _)
 
@@ -395,12 +429,15 @@ let file_to_import := mk_file_to_import env,
 --   trace (all_paths G `data.int.cast `data.equiv.basic),
   -- skip)
 meta def get_minimal_imports (e : environment) (n : name) (G : dag name) (Gr := G.reachable_table)
-  (fdata : list import_data) :
+  (fdata : list import_data) (robust : bool := tt) :
   rb_set name :=
   -- let n := `ring_theory.discrete_valuation_ring,
   -- let n := `algebra.lie.classical,
   let b := mk_file_dep_counts e n Gr fdata in
-      G.minimal_vertices $ b.keys.filter (λ k, b.find k ≠ some 0)
+  G.minimal_vertices $
+    (b.keys.filter (λ k, b.find k ≠ some 0)).union $ -- the needed imports
+    ((Gr.find n).iget).to_list.filter -- if "robust" add some extra original imports back so we never remove tactic
+      (λ dn, robust ∧ dn ≠ n ∧ (`tactic).is_prefix_of dn)
 
 meta def optimize_imports (e : environment) (nam : name) (G : dag name) (Gr := G.reachable_table)
   (fdata : list import_data) :
@@ -475,7 +512,7 @@ open io io.fs native tactic
 meta def main : io unit :=
 do
   e ← run_tactic get_env,
-  G ← get_import_dag e [`logic.relation],--[`algebra.char_p.quotient],
+  G ← get_import_dag e [`algebra.char_p.quotient],
   print_ln G.keys,
   let Gr := G.reachable_table,
   print_ln sformat!"running on {G.keys.length} files",
@@ -499,7 +536,7 @@ do
         | result.exception msg _ _ :=
           "File splitter failed:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ())
       end)
-    64, -- chunk size
+    16, -- chunk size
     print_ln $ "".intercalate res
 
-run_cmd unsafe_run_io main
+-- run_cmd unsafe_run_io main
