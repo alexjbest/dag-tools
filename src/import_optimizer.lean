@@ -492,8 +492,8 @@ d}' src/{fn}.lean\n"
 run_cmd unsafe_run_io (do
   e ← run_tactic get_env,
   -- let L := [`data.sym.basic],
-  let L := [`data.list.defs],
-  -- let L := [`tactic.basic],
+  -- let L := [`data.list.defs],
+  let L := [`tactic.basic],
   -- let L := [`linear_algebra.affine_space.basic],
   -- let L := [`linear_algebra.matrix.determinant],
   fdata ← run_tactic $ get_file_data e L.head,
@@ -567,4 +567,3 @@ do
   print_ln $ "".intercalate res
 
 -- run_cmd unsafe_run_io main
-#lint
