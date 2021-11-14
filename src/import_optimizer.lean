@@ -438,6 +438,7 @@ meta def get_import_dag (e : environment) (files : list name) : io (dag name) :=
 files.mfoldl (λ ol file, get_dag_aux e file ol) (dag.mk _)
 
 open native
+-- TODO we should probably not pass this function around anymore
 /-- Given an environment creates a function `file_to_import` that translates a filename into an
     import `name`.
     We remove `default` by default.
@@ -473,7 +474,9 @@ meta def get_minimal_imports (e : environment) (n : name) (G : dag name) (Gr := 
   let b := mk_file_dep_counts e n Gr fdata in
   G.minimal_vertices $
     (b.keys.filter (λ k, b.find k ≠ some 0)).union $ -- the needed imports
-      ((Gr.find n).iget).to_list.filter -- if "robust" add some extra original imports back so we never remove tactic
+      ((Gr.find n).iget).to_list.filter
+        -- if "robust" add some extra original imports back so we never remove imports from tactics
+        -- this is a heuristic but quite effective
         (λ dn, robust ∧ dn ≠ n ∧ (`tactic).is_prefix_of dn)
 
 meta def optimize_imports (e : environment) (nam : name) (G : dag name) (Gr := G.reachable_table)
@@ -492,17 +495,22 @@ meta def optimize_imports (e : environment) (nam : name) (G : dag name) (Gr := G
   * This clobbers import comments
   * Mac users should replace `sed` with `gsed` (via homebrew) in the script to ensure it works
   * This pipes to stdout by default, append `-i` after every `sed` to replace in-place
+
+  We add the decidable_eq name argument so this function stays non-meta, this is probably pointless
+  but it just feels weird to have this function meta.
 -/
-def output_to_sed (o : name × list name × list name × ℕ × ℕ) : string :=
+def output_to_sed [decidable_eq name] (o : name × list name × list name × ℕ × ℕ) : string :=
 let ⟨na, ol, ne, oli, nei⟩ := o,
     fn := na.to_string_with_sep "/",
     -- https://unix.stackexchange.com/questions/342516/sed-remove-all-matches-in-the-file-and-insert-some-lines-where-the-first-match
     imps := "\\\n".intercalate $ ne.map (λ i, sformat!"import {i}") in
+if ne ≠ ol then
 sformat!"# {oli} → {nei} {ol}\n" ++
 (if oli = nei then "# only transitive imports removed\n" else "") ++
 "sed '/^import /{x;//!c\\" ++ sformat!"
 {imps}
 d}' src/{fn}.lean\n"
+else ""
 
 -- set_option profiler true
 -- run_cmd unsafe_run_io (do
@@ -551,7 +559,7 @@ open io io.fs native tactic
 meta def main : io unit :=
 do
   e ← run_tactic get_env,
-  G ← get_import_dag e [`algebra.char_p.quotient],
+  G ← get_import_dag e [`all],
   --[`algebra.group.defs], --[algebra.char_p.quotient],
   print_ln G.keys,
   let Gr := G.reachable_table,
@@ -572,16 +580,20 @@ do
         guardb (b2 ∧ ¬ b) >>
         (do
           fdata ← run_tactic $ get_file_data e na,
+          -- print_ln (if na = `tactic.dependencies then
+          --   to_string fdata else ""), --debug
 
-          let T := optimize_imports e na acc.1 Gri fdata,
+          let T := optimize_imports e na acc.1 Gr fdata,
           let old_imp := (G.find na).qsort (λ a b, a.to_string < b.to_string : name → name → bool),
            -- new imports not the same as old in any way
-          if T.2.1 ≠ old_imp
-            ∧ T.2.2 ≠ 0 -- Any file that ends up with no imports is surely a default-style
+          if -- (¬ tt) ∨ -- robust mode
+            T.2.2 ≠ 0 -- Any file that ends up with no imports is surely a default-style
                             -- special case, e.g. `tactic.basic` so we ignore it
-          then
+          then -- update the deps
             return $ some (⟨T.1, old_imp, T.2.1, G.count_descendents old_imp, T.2.2⟩ : name × list name × list name × ℕ × ℕ)
-          else return none) <|> return none)
+          else -- don't update the deps
+            return $ some (⟨T.1, old_imp, old_imp, G.count_descendents old_imp, G.count_descendents old_imp⟩ : name × list name × list name × ℕ × ℕ)
+          ) <|> return none)
       s
     with
       | result.success w _ := w
@@ -591,10 +603,17 @@ do
     end)
     1 -- chunk size
     in (
-     (outs.filter $ λ op, option.is_some op = tt).foldl (λ oacc outp, let na := outp.iget.fst in rb_map.insert oacc na outp.iget.2.2.1) acc.1, -- filter the recursive dag
-    --  acc.1,
+      if tt then
+        (outs.filter $
+          λ op, option.is_some op = tt).foldl
+        (λ oacc outp, let na := outp.iget.fst in
+          rb_map.insert oacc na outp.iget.2.2.1) acc.1 -- update the recursive dag
+      else
+        acc.1,
      acc.2 ++ (outs.map (option.map output_to_sed)).map option.iget)) -- put all the outputs together
     (G, []),
+  -- print_ln $ to_fmt G,
+  -- print_ln $ to_fmt res.fst,
   print_ln $ "".intercalate res.snd
 
 -- run_cmd unsafe_run_io main
