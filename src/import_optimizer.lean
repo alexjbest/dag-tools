@@ -24,6 +24,8 @@ Notes:
     attribute are applied so the dependency is missed, solution change to another or no simp set.
   - The file being modified uses notation but only notation from another file, solution, ignore it
     or move the notation next to the defs it refers to.
+  - If a file contains an `example` which introduces extra dependencies this won't be visible in the
+    environment after, so will be missed.
 
 -/
 
@@ -83,6 +85,7 @@ def evidence_attrs : list name :=
  `ancestor,
  `norm_cast,
  `nontriviality,
+ `measurability,
  `mk_iff,
  `tidy
  ]
@@ -571,7 +574,6 @@ do
   let res := dag_ord.foldl (λ (acc : dag name × list string) (rankfiles : ℕ × list name),
     trace (to_string rankfiles.1) $
     let files := rankfiles.snd,
-        Gri := acc.1.reachable_table, -- TODO is recomputing the needed?
         outs := files.map_async_chunked (λ na,
     match
       (unsafe_run_io $ do
