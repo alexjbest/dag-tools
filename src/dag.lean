@@ -1,4 +1,3 @@
-import tactic.lint
 import meta.rb_map
 variables (T : Type)
 meta def dag : Type := native.rb_lmap T T
@@ -93,6 +92,23 @@ meta def dfs {α : Type} (d : dag T) (f : T → α → α) (a : α) (start : lis
 -- #eval (((dag.mk ℕ).insert_edges [(9,7),(3,7),(4,3),(4,9)]).dfs_aux
 --   (λ _ acc, acc ++ "")
 --   (λ pa ch acc, acc ++ _root_.to_string (pa,ch) ++ " forms part of an (undirected) cycle!\n") 4 ("", mk_rb_set)).fst
+
+/-- Compute the rank of each vertex `v`, this is a natural number `n` at least 1 such that
+    any vertex of rank n has all descendents in lower ranks. -/
+meta def rank (d : dag T) (start : list T := d.vertices) : rb_map T ℕ :=
+d.dfs
+  (λ v acc, acc.insert v $ ((d.find v).foldl (λ n m, max n $ acc.zfind m) 0) + 1) --(d.find v).foldl (λ acc' de, acc'.erase de) (acc.insert v)
+  mk_rb_map
+  start
+
+-- #eval (((dag.mk ℕ).insert_edges [(1,2),(2,3),(3,4),(0,2)]).rank.to_list
+
+/-- Compute a mapping of a dag into ranks of each vertex `v`. -/
+meta def ranks (d : dag T) (start : list T := d.vertices) : rb_lmap ℕ T :=
+let ra := d.rank start in
+start.foldl (λ acc v, acc.insert (ra.zfind v) v) mk_rb_map
+
+-- #eval ((dag.mk ℕ).insert_edges [(1,2),(2,3),(3,4),(0,2)]).ranks.to_list
 
 -- TODO is this inefficient?
 /-- Take the sub-graph of things reachable from `v` -/

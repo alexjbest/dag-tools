@@ -478,21 +478,22 @@ meta def get_minimal_imports (e : environment) (n : name) (G : dag name) (Gr := 
 
 meta def optimize_imports (e : environment) (nam : name) (G : dag name) (Gr := G.reachable_table)
   (fdata : list import_data) :
-  name × list string × list string × ℕ × ℕ :=
+  name × list name × ℕ :=
   let new_imp := get_minimal_imports e nam G Gr fdata,
       old_imp := G.find nam in
   (nam,
-   (old_imp.map name.to_string).qsort (λ a b, a < b : string → string → bool),
-   (new_imp.keys.map to_string).qsort (λ a b, a < b : string → string → bool),
-   G.count_descendents (old_imp : list name),
+  --  old_imp.qsort (λ a b, a.to_string < b.to_string : name → name → bool),
+   new_imp.keys.qsort (λ a b, a.to_string < b.to_string : name → name → bool),
+  --  G.count_descendents (old_imp : list name),
    G.count_descendents (new_imp.keys : list name))
+
 
 /-- Convert the output of `optimize_imports` into a sed script for removing these imports. Note:
   * This clobbers import comments
   * Mac users should replace `sed` with `gsed` (via homebrew) in the script to ensure it works
   * This pipes to stdout by default, append `-i` after every `sed` to replace in-place
 -/
-def output_to_sed (o : name × list string × list string × ℕ × ℕ) : string :=
+def output_to_sed (o : name × list name × list name × ℕ × ℕ) : string :=
 let ⟨na, ol, ne, oli, nei⟩ := o,
     fn := na.to_string_with_sep "/",
     -- https://unix.stackexchange.com/questions/342516/sed-remove-all-matches-in-the-file-and-insert-some-lines-where-the-first-match
@@ -551,11 +552,19 @@ meta def main : io unit :=
 do
   e ← run_tactic get_env,
   G ← get_import_dag e [`algebra.char_p.quotient],
+  --[`algebra.group.defs], --[algebra.char_p.quotient],
   print_ln G.keys,
   let Gr := G.reachable_table,
   print_ln sformat!"running on {G.keys.length} files",
   s ← run_tactic read,
-  let res := G.keys.map_async_chunked (λ na,
+  -- this is the order we will traverse the dag so we can do lower imports first and parallelize too
+  let dag_ord := G.ranks.to_list.qsort (λ a b, prod.fst a < prod.fst b),
+  print_ln dag_ord,
+  let res := dag_ord.foldl (λ (acc : dag name × list string) (rankfiles : ℕ × list name),
+    trace (to_string rankfiles.1) $
+    let files := rankfiles.snd,
+        Gri := acc.1.reachable_table, -- TODO is recomputing the needed?
+        outs := files.map_async_chunked (λ na,
     match
       (unsafe_run_io $ do
         b ← is_default e na, -- we skip default files
@@ -563,22 +572,29 @@ do
         guardb (b2 ∧ ¬ b) >>
         (do
           fdata ← run_tactic $ get_file_data e na,
-          -- here we should filter fdata to remove stuff it cannot actually depend on
 
-          let T := optimize_imports e na G Gr fdata,
-          if T.2.2.1 ≠ T.2.1 -- new imports not the same as old in any way
-            ∧ T.2.2.2.2 ≠ 0 -- Any file that ends up with no imports is surely a default-style
-                            -- special case, e.g. `tactic.basic`
+          let T := optimize_imports e na acc.1 Gri fdata,
+          let old_imp := (G.find na).qsort (λ a b, a.to_string < b.to_string : name → name → bool),
+           -- new imports not the same as old in any way
+          if T.2.1 ≠ old_imp
+            ∧ T.2.2 ≠ 0 -- Any file that ends up with no imports is surely a default-style
+                            -- special case, e.g. `tactic.basic` so we ignore it
           then
-            return $ output_to_sed T
-          else return "") <|> return "")
+            return $ some (⟨T.1, old_imp, T.2.1, G.count_descendents old_imp, T.2.2⟩ : name × list name × list name × ℕ × ℕ)
+          else return none) <|> return none)
       s
     with
       | result.success w _ := w
       | result.exception msg _ _ :=
-        "File splitter failed:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ())
+        trace ("File splitter failed:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ()))
+        none
     end)
-    8, -- chunk size
-  print_ln $ "".intercalate res
+    1 -- chunk size
+    in (
+     (outs.filter $ λ op, option.is_some op = tt).foldl (λ oacc outp, let na := outp.iget.fst in rb_map.insert oacc na outp.iget.2.2.1) acc.1, -- filter the recursive dag
+    --  acc.1,
+     acc.2 ++ (outs.map (option.map output_to_sed)).map option.iget)) -- put all the outputs together
+    (G, []),
+  print_ln $ "".intercalate res.snd
 
 -- run_cmd unsafe_run_io main
