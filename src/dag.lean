@@ -34,10 +34,11 @@ section
 variables [has_to_format T]
 open format prod native.rb_map
 private meta def format_key_data (k : T) (d : list T) (first : bool) : format :=
-(if first then to_fmt "" else to_fmt "," ++ line) ++ "\"" ++ to_fmt k ++ "\""  ++ space ++ to_fmt "-> {" ++ space ++ to_fmt (",".intercalate $ d.map (λ a, "\""++(format.to_string $ to_fmt a) ++ "\"")) ++ space ++ "};" -- todo what symbol?
+(if first then to_fmt "" else to_fmt "" ++ line) ++ "\"" ++ to_fmt k ++ "\""  ++ space ++ to_fmt "-> {" ++ space ++ to_fmt (",".intercalate $ d.map (λ a, "\""++(format.to_string $ to_fmt a) ++ "\"")) ++ space ++ "};" -- todo what symbol?
 
 meta instance : has_to_format (dag T) :=
-⟨λ m, group $ to_fmt "digraph D {" ++ nest 1 (fst (fold m (to_fmt "", tt) (λ k d p, (fst p ++ format_key_data k d (snd p), ff)))) ++
+⟨λ m, group $ to_fmt "digraph D {" ++ nest 1 (fst (fold m (to_fmt "", tt)
+  (λ k d p, (fst p ++ format_key_data k d (snd p), ff)))) ++
               to_fmt "}"⟩
 meta instance : has_repr (dag T) := ⟨λ s, (has_to_format.to_format s).to_string⟩
 end
