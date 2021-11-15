@@ -1,17 +1,16 @@
 import dag
-import data.vector
-import crawler
 import tactic
-import data.int.basic
-import number_theory.quadratic_reciprocity
-import topology.algebra.module
-import topology.algebra.ordered.basic
-import ring_theory.discrete_valuation_ring
-import algebra.lie.classical
-import all
-import system.io
-import init.meta.widget.tactic_component
-import data.list.lex
+import crawler
+-- import data.int.basic
+-- import number_theory.quadratic_reciprocity
+-- import topology.algebra.module
+-- import topology.algebra.ordered.basic
+-- import ring_theory.discrete_valuation_ring
+-- import algebra.lie.classical
+-- import all
+-- import system.io
+-- import init.meta.widget.tactic_component
+-- import data.list.lex
 
 /-!
 Notes:
@@ -280,6 +279,7 @@ rb_map.mk _ _
 
 meta instance [has_to_format T] : has_to_format (rb_counter T) := rb_map.has_to_format
 meta instance [has_to_string T] : has_to_string (rb_counter T) := rb_map.has_to_string
+meta instance {R : Type*} [has_to_string T] [has_to_string R]: has_to_string (rb_lmap T R) := rb_map.has_to_string
 end rb_counter
 end rb_counter
 
@@ -485,8 +485,7 @@ meta def get_minimal_imports (e : environment) (n : name) (G : dag name) (Gr := 
 meta def optimize_imports (e : environment) (nam : name) (G : dag name) (Gr := G.reachable_table)
   (fdata : list import_data) :
   name × list name × ℕ :=
-  let new_imp := get_minimal_imports e nam G Gr fdata,
-      old_imp := G.find nam in
+  let new_imp := get_minimal_imports e nam G Gr fdata in
   (nam,
   --  old_imp.qsort (λ a b, a.to_string < b.to_string : name → name → bool),
    new_imp.keys.qsort (λ a b, a.to_string < b.to_string : name → name → bool),
@@ -516,16 +515,18 @@ d}' src/{fn}.lean\n"
 else ""
 
 -- set_option profiler true
--- run_cmd unsafe_run_io (do
---   e ← run_tactic get_env,
---   -- let L := [`data.sym.basic],
+run_cmd unsafe_run_io (do
+  e ← run_tactic get_env,
+  let L := [`all],
 --   -- let L := [`data.list.defs],
 --   let L := [`tactic.basic],
 --   -- let L := [`linear_algebra.affine_space.basic],
 --   -- let L := [`linear_algebra.matrix.determinant],
 --   fdata ← run_tactic $ get_file_data e L.head,
 --   -- print_ln fdata,
---   G ← get_import_dag e L,
+  G ← get_import_dag e L,
+  print_ln $ to_string G.size,
+  print_ln $ to_string G.total_upset)
 --   -- print_ln (to_fmt G),
 --   -- let file_to_import := mk_file_to_import e,
 --   -- let G' := mk_file_dag e `algebra.group_with_zero.basic file_to_import,

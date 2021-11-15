@@ -318,4 +318,12 @@ meta def reverse {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)]
 d.fold (dag.mk T) (λ v es (acc : dag T), es.foldl (λ (acc' : dag T) w, acc'.insert_edge w v) $ acc.insert_vertex v)
 -- #eval ((dag.mk ℕ).insert_edges [(1, 2), (2,3)]).reverse
 
+-- TODO we probably don't actually need to reverse here?
+/-- Compute the total number of ancestors descendent pairs in a dag, excluding self -/
+meta def total_upset {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)] [decidable_eq T]
+  (d : dag T) : ℕ :=
+let dr := d.reverse.reachable_table in
+dr.fold 0 (λ v es acc, acc + (es.size - 1))
+-- #eval ((dag.mk ℕ).insert_edges [(1, 3), (2,3), (4,2)]).total_upset
+
 end dag
