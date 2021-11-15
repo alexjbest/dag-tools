@@ -10,7 +10,7 @@ namespace dag
 --  expr.mk_app `(native.rb_map.of_list) (list.reflect ((native.rb_map.fold ns [] (λ a b o, (a, b) :: o)))
 -- `(id %%(expr.mk_app `(Prop) $ ns.map (flip expr.const [])) : dag T)
 
-meta def mk  [has_lt T] [decidable_rel ((<) : T → T → Prop)] : dag T := native.rb_lmap.mk T T
+meta def mk [has_lt T] [decidable_rel ((<) : T → T → Prop)] : dag T := native.rb_lmap.mk T T
 variable {T}
 meta def insert_vertex (d : dag T) (a : T) : dag T :=
 if ¬ native.rb_map.contains d a then
@@ -312,5 +312,10 @@ rb_set.of_list $ (d.minimal_vertices_with_components start).snd.map (λ S, d.mee
   -- (rb_set.of_list [4,7])
 --#eval ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5),(7,1),(7,3), (6,8)]).meet [8]
 --#eval ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5),(7,1),(7,3), (6,8)]).reachable 8
+
+meta def reverse {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)] [decidable_eq T]
+  (d : dag T) : dag T :=
+d.fold (dag.mk T) (λ v es (acc : dag T), es.foldl (λ (acc' : dag T) w, acc'.insert_edge w v) $ acc.insert_vertex v)
+-- #eval ((dag.mk ℕ).insert_edges [(1, 2), (2,3)]).reverse
 
 end dag
