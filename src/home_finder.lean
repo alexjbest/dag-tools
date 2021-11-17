@@ -100,7 +100,8 @@ do file ← find_highest tgt,
    let tgtposi := ((file.2.bind e.decl_pos).map pos.line).iget + 1,
    let htm : html (unit) := h "p" [] [h "a"
      [on_click (λ _, ()), attr.style [("cursor", "pointer")]]
-     [(sformat!"{tgt} should be inserted in {file.fst} after line {tgtposi}" : string)]],
+     [h "tt" [] [tgt], (sformat!" can be inserted in " : string),
+      h "tt" [] [file.fst], (sformat!" after line {tgtposi}" : string)]],
    save_widget posi $
     component.ignore_action $
     component.with_effects (λ _ x,
@@ -131,6 +132,4 @@ def recfn : ℕ → ℕ
 | 0 := 0
 | (n+1) := n
 
-#vind_home pell.xn
-
-run_cmd skip
+#vind_home recfn
