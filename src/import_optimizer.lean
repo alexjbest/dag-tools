@@ -1,13 +1,14 @@
 import dag
 import tactic
 import crawler
+import testa
 -- import data.int.basic
 -- import number_theory.quadratic_reciprocity
 -- import topology.algebra.module
 -- import topology.algebra.ordered.basic
 -- import ring_theory.discrete_valuation_ring
 -- import algebra.lie.classical
--- import all
+import all
 -- import system.io
 -- import init.meta.widget.tactic_component
 -- import data.list.lex
@@ -251,19 +252,20 @@ let fn_string := import_to_file env.get_mathlib_dir fname in
 --   env.decl_olean na = fn_string then
 --     option.some <$> mk_data env d na else none)
 
+open native
 /-- Creates a dag of input data. -/
-meta def mk_file_dag_of_file_data (fdata : list import_data) :
+meta def mk_file_dag_of_file_data (fdata : rb_map name import_data) :
   dag import_data :=
 -- let fdata := mk_file_data env fname file_to_import,
   -- let decl_names := fdata.map import_data.decl_name in
-fdata.foldl
-  (λ G id,
+fdata.fold
+  (dag.mk _)
+  (λ _ id G,
     id.deps.foldl
       (λ G2 dep,
-        ((fdata.find (λ el : import_data, el.decl_name = dep)).map -- todo maybe replace with an rb_map
+        ((fdata.find dep).map -- todo maybe replace with an rb_map
           (λ a, G2.insert_edge a id)).get_or_else G2)
       (G.insert_vertex id))
-  (dag.mk _)
 
 section rb_counter
 open native
@@ -352,7 +354,7 @@ open tactic native
 
 /-- -/
 meta def mk_file_dep_counts_basic (env : environment) (fname : name) (file_to_import : string → name)
-  (fdata : list import_data) :
+  (fdata : rb_map name import_data) :
   rb_counter name :=
 let G := mk_file_dag_of_file_data fdata,
     Gr := G.count_all_descendents in
@@ -459,7 +461,7 @@ let mathlib_pre := e.get_mathlib_dir,
       ).split_on '/')).remove_default
 
 meta def mk_file_dep_counts (env : environment) (fname : name) (Gr : rb_map name (rb_set name))
-  (fdata : list import_data) :
+  (fdata : rb_map name import_data) :
   rb_counter name :=
 let file_to_import := mk_file_to_import env,
     dcb := mk_file_dep_counts_basic env fname file_to_import fdata,
@@ -471,8 +473,8 @@ let file_to_import := mk_file_to_import env,
     (λ nam co acc, (Gr.ifind nam).fold acc (λ de acc', acc'.incr_by de $ dc.zfind nam))).erase fname
   -- return $ (Gr.fold dc (λ na ln odc, ln.fold odc (λ de odc', odc'.incr_by de ((dc.find na).get_or_else 0)))).erase fname
 
-meta def get_minimal_imports (e : environment) (n : name) (G : dag name) (Gr := G.reachable_table)
-  (fdata : list import_data) (robust : bool := tt) :
+meta def get_minimal_imports (e : environment) (n : name) (G : dag name) (Gr : rb_map name (rb_set name))
+  (fdata : rb_map name import_data) (robust : bool := tt) :
   rb_set name :=
   let b := mk_file_dep_counts e n Gr fdata in
   G.minimal_vertices $
@@ -480,19 +482,21 @@ meta def get_minimal_imports (e : environment) (n : name) (G : dag name) (Gr := 
       ((Gr.find n).iget).to_list.filter
         -- if "robust" add some extra original imports back so we never remove imports from tactics
         -- this is a heuristic but quite effective
-        (λ dn, robust ∧ dn ≠ n ∧ (`tactic).is_prefix_of dn)
+        (λ dn, robust ∧ dn ≠ n ∧ ((`tactic).is_prefix_of dn ∨ dn = `data.rbtree.default_lt))
 
 meta def optimize_imports (e : environment) (nam : name) (G : dag name) (Gr := G.reachable_table)
-  (fdata : list import_data) :
+  (fdata : rb_map name import_data) :
   name × list name × ℕ :=
   let new_imp := get_minimal_imports e nam G Gr fdata in
   (nam,
   --  old_imp.qsort (λ a b, a.to_string < b.to_string : name → name → bool),
-   new_imp.keys.qsort (λ a b, a.to_string < b.to_string : name → name → bool),
+   new_imp.to_list,
   --  G.count_descendents (old_imp : list name),
    G.count_descendents (new_imp.keys : list name))
 
-
+meta instance : is_total name ((<) : name → name → Prop) := sorry
+meta instance oof : is_trans name ((<) : name → name → Prop) := sorry
+meta instance asdsa : is_antisymm name ((<) : name → name → Prop) := sorry
 /-- Convert the output of `optimize_imports` into a sed script for removing these imports. Note:
   * This clobbers import comments
   * Mac users should replace `sed` with `gsed` (via homebrew) in the script to ensure it works
@@ -501,32 +505,42 @@ meta def optimize_imports (e : environment) (nam : name) (G : dag name) (Gr := G
   We add the decidable_eq name argument so this function stays non-meta, this is probably pointless
   but it just feels weird to have this function meta.
 -/
-def output_to_sed [decidable_eq name] (o : name × list name × list name × ℕ × ℕ) : string :=
+meta def output_to_sed [decidable_eq name] -- TODO remove numbers
+ (o : name × rb_set name × rb_set name × ℕ × ℕ) : string :=
 let ⟨na, ol, ne, oli, nei⟩ := o,
     fn := na.to_string_with_sep "/",
     -- https://unix.stackexchange.com/questions/342516/sed-remove-all-matches-in-the-file-and-insert-some-lines-where-the-first-match
-    imps := "\\\n".intercalate $ ne.map (λ i, sformat!"import {i}") in
-if ne ≠ ol then
-sformat!"# {oli} → {nei} {ol}\n" ++
-(if oli = nei then "# only transitive imports removed\n" else "") ++
+    ne2 := ne.to_list,
+    ol2 := ol.to_list,
+    imps := "\\\n".intercalate $ (ne2.map (λ i, sformat!"import {i}")).qsort (λ a b, a <  b) in
+if ne2 ≠ ol2 then
+sformat!"# {oli} → {nei} {ol2}\n" ++
+-- (if oli = nei then "# only transitive imports removed\n" else "") ++
 "sed '/^import /{x;//!c\\" ++ sformat!"
 {imps}
 d}' src/{fn}.lean\n"
 else ""
 
 -- set_option profiler true
-run_cmd unsafe_run_io (do
-  e ← run_tactic get_env,
-  let L := [`all],
---   -- let L := [`data.list.defs],
---   let L := [`tactic.basic],
---   -- let L := [`linear_algebra.affine_space.basic],
---   -- let L := [`linear_algebra.matrix.determinant],
+-- run_cmd unsafe_run_io (do
+--   e ← run_tactic get_env,
+--   -- let L := [`all],
+-- --   -- let L := [`data.list.defs],
+-- --   let L := [`tactic.basic],
+-- --   -- let L := [`linear_algebra.affine_space.basic],
+-- --   -- let L := [`linear_algebra.matrix.determinant],
+--   let L := [`algebra.char_p.invertible],
 --   fdata ← run_tactic $ get_file_data e L.head,
---   -- print_ln fdata,
-  G ← get_import_dag e L,
-  print_ln $ to_string G.size,
-  print_ln $ to_string G.total_upset)
+--   print_ln fdata,
+--   G ← get_import_dag e L,
+--   -- print_ln $ to_string G.size,
+--   -- print_ln $ to_fmt $ G.find `algebra.char_p.invertible,
+--   let Gr := G.reachable_table,
+--   let T := L.map (λ nam, optimize_imports e nam G Gr fdata),
+--   -- print_ln $ to_fmt $ (G.reverse.reachable_table.find `linear_algebra.tensor_product).map (rb_set.size)
+--   -- print_ln $ to_fmt $ G.reverse.reachable_table.fold (mk_rb_map : rb_counter name) (λ v es acc, acc.insert v es.size),
+--   print_ln $ to_string T
+--   )
 --   -- print_ln (to_fmt G),
 --   -- let file_to_import := mk_file_to_import e,
 --   -- let G' := mk_file_dag e `algebra.group_with_zero.basic file_to_import,
@@ -564,59 +578,80 @@ meta def main : io unit :=
 do
   e ← run_tactic get_env,
   G ← get_import_dag e [`all],
-  --[`algebra.group.defs], --[algebra.char_p.quotient],
   print_ln G.keys,
   let Gr := G.reachable_table,
   print_ln sformat!"running on {G.keys.length} files",
   s ← run_tactic read,
   -- this is the order we will traverse the dag so we can do lower imports first and parallelize too
-  let dag_ord := G.ranks.to_list.qsort (λ a b, prod.fst a < prod.fst b),
+  let dag_ord := G.ranks.to_list.reverse, --qsort (λ a b, prod.fst a < prod.fst b),
   print_ln dag_ord,
+  -- let fdatas := rb_map.of_list $ G.keys.zip (G.keys.map_async_chunked (λ na,
+  --   match (do
+  --           b ← unsafe_run_io $ is_default e na, -- we skip default files
+  --           b2 ← unsafe_run_io $ file_is_in_mathlib e na, -- we only work on mathlib itself (TODO allow other projects)
+  --           guardb (b2 ∧ ¬ b) >>
+  --   do l ← get_file_data e na,
+  --     return $ rb_map.of_list $ l.map (λ t, (t.decl_name, t))) s
+  --   with
+  --     | result.success w _ := w
+  --     | result.exception msg _ _ :=
+  --       -- trace ("File splitter failed:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ()))
+  --       mk_rb_map
+  --       end) 10),
+  -- print_ln "fdata done",
+  -- print_ln fdatas.size,
+  -- print_ln "fdata done",
   let res := dag_ord.foldl (λ (acc : dag name × list string) (rankfiles : ℕ × list name),
-    trace (to_string rankfiles.1) $
-    let files := rankfiles.snd,
-        outs := files.map_async_chunked (λ na,
-    match
-      (unsafe_run_io $ do
-        b ← is_default e na, -- we skip default files
-        b2 ← file_is_in_mathlib e na, -- we only work on mathlib itself (TODO allow other projects)
-        guardb (b2 ∧ ¬ b) >>
-        (do
-          fdata ← run_tactic $ get_file_data e na,
-          -- print_ln (if na = `tactic.dependencies then
-          --   to_string fdata else ""), --debug
+    let
+      files := rankfiles.snd,
+      re := acc.1.reachable_table files,
+      outs := files.map_async_chunked (λ na,
+        match
+          (unsafe_run_io $ do
+          print_ln na,
+            b ← is_default e na, -- we skip default files
+            b2 ← file_is_in_mathlib e na, -- we only work on mathlib itself (TODO allow other projects)
+            guardb (b2 ∧ ¬ b) >>
+            (do
+              fdata ← run_tactic $ get_file_data e na,
 
-          let T := optimize_imports e na acc.1 Gr fdata,
-          let old_imp := (G.find na).qsort (λ a b, a.to_string < b.to_string : name → name → bool),
-           -- new imports not the same as old in any way
-          if -- (¬ tt) ∨ -- robust mode
-            T.2.2 ≠ 0 -- Any file that ends up with no imports is surely a default-style
-                            -- special case, e.g. `tactic.basic` so we ignore it
-          then -- update the deps
-            return $ some (⟨T.1, old_imp, T.2.1, G.count_descendents old_imp, T.2.2⟩ : name × list name × list name × ℕ × ℕ)
-          else -- don't update the deps
-            return $ some (⟨T.1, old_imp, old_imp, G.count_descendents old_imp, G.count_descendents old_imp⟩ : name × list name × list name × ℕ × ℕ)
-          ) <|> return none)
-      s
-    with
-      | result.success w _ := w
-      | result.exception msg _ _ :=
-        trace ("File splitter failed:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ()))
-        none
-    end)
-    1 -- chunk size
-    in (
-      if tt then
+              let T := optimize_imports e na acc.1 re $
+  rb_map.of_list $ fdata.map (λ t, (t.decl_name, t))
+              , -- fdatas.ifind na,
+              -- the original imports in the source files
+              if -- (¬ tt) ∨ -- robust mode
+                T.2.2 ≠ 0 -- Any file that ends up with no imports is surely a default-style
+                                -- special case, e.g. `tactic.basic` so we ignore it
+              then -- update the deps
+                return $ some (⟨T.1, rb_set.of_list (G.find na), rb_set.of_list $ (T.2.1 ∪ G.find na).filter
+                  -- TODO this should probably be an actual function
+                   $ λ imp, T.2.1.foldl (λ acc min, acc || (re.ifind min).contains imp) ff = tt,
+                  G.count_descendents $ G.find na, T.2.2⟩ : name × rb_set name × rb_set name × ℕ × ℕ)
+              else -- don't update the deps
+                let old_imp := (G.find na) in
+                return $ some (⟨T.1, rb_set.of_list old_imp, rb_set.of_list old_imp, G.count_descendents old_imp, G.count_descendents old_imp⟩ : name × rb_set name × rb_set name × ℕ × ℕ)
+              ) <|> return none)
+          s
+        with
+          | result.success w _ := w
+          | result.exception msg _ _ :=
+            trace ("File splitter failed:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ()))
+            none
+       end)
+       1 -- chunk size
+    in (if tt then
         (outs.filter $
           λ op, option.is_some op = tt).foldl
         (λ oacc outp, let na := outp.iget.fst in
-          rb_map.insert oacc na outp.iget.2.2.1) acc.1 -- update the recursive dag
+          rb_map.insert oacc na $ outp.iget.2.2.1.to_list) acc.1 -- update the recursive dag
       else
-        acc.1,
+
+        acc.1, -- old version
      acc.2 ++ (outs.map (option.map output_to_sed)).map option.iget)) -- put all the outputs together
     (G, []),
   -- print_ln $ to_fmt G,
   -- print_ln $ to_fmt res.fst,
   print_ln $ "".intercalate res.snd
 
+-- set_option profiler true
 -- run_cmd unsafe_run_io main
