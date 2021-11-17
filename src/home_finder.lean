@@ -59,14 +59,11 @@ let mathlib_pre := e.get_mathlib_dir,
       ).split_on '/')).remove_default)
 meta def find_highest (tgt : name) : tactic (name × option name) :=
 do
-   trace "ok",
    d ← get_decl tgt,
    e ← get_env,
 
-   trace "ok",
    dat ← mk_data e "" d,
    let files := dat.deps.map (λ n, module_info.of_module_id (e.decl_olean n).iget),
-   trace "ok",
    let ftoi := mk_file_to_import' e,
   --  trace files,
   let global_fnames : rb_set name := e.get_decls.foldl (λ acc d, (((e.decl_olean d.to_name).bind ftoi).map acc.insert).get_or_else acc) mk_rb_set,
@@ -101,10 +98,9 @@ do file ← find_highest tgt,
   --  | some s := (module_info.of_module_id s).id
   --  end,
    let tgtposi := ((file.2.bind e.decl_pos).map pos.line).iget + 1,
-   let htm : html (unit) := h "a" [on_click (λ _, ()), attr.style [("cursor", "pointer")]]
-    [(sformat!"{tgt} should be inserted in {file.fst} after line {tgtposi}" : string)],
-   trace "oh",
-   trace $ import_to_file e.get_mathlib_dir file.1,
+   let htm : html (unit) := h "p" [] [h "a"
+     [on_click (λ _, ()), attr.style [("cursor", "pointer")]]
+     [(sformat!"{tgt} should be inserted in {file.fst} after line {tgtposi}" : string)]],
    save_widget posi $
     component.ignore_action $
     component.with_effects (λ _ x,
@@ -131,9 +127,10 @@ meta def find_home_cmd (x : interactive.parse $ tk "#vind_home") : lean.parser u
 end tactic
 
 
--- def recfn : ℕ → ℕ
--- | 0 := 0
--- | (n+1) := n
+def recfn : ℕ → ℕ
+| 0 := 0
+| (n+1) := n
 
+#vind_home pell.xn
 
--- #check ``recfn
+run_cmd skip
