@@ -293,9 +293,9 @@ S.foldl (λ (ol : bool) (w : T), ol && dreach.contains w) tt
 -- TODO this is hilariously inefficient
 --#eval ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5)]).is_reachable [] 3 3
 
-meta def meet [decidable_eq T] [has_to_string T] (d : dag T) (ts : list T) (dr : rb_map T (rb_set T)) (S : list T) : T :=
+meta def meet [decidable_eq T] [has_to_string T] (d : dag T) (ts : list T) (dr : rb_map T (rb_set T)) (S : list T) : option T :=
 -- trace (to_string ts)
-((slice_up_to (∈ S) ts).reverse.find (λ v, d.all_reachable dr v S)).iget
+(slice_up_to (∈ S) ts).reverse.find (λ v, d.all_reachable dr v S)
 
 meta def meet' [decidable_eq T] [has_to_string T] (d : dag T) (S : list T) : T := let ts := d.topological_sort in
 -- trace (to_string ts)
