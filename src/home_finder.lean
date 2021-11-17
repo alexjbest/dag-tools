@@ -6,6 +6,8 @@ import import_optimizer
 -- see also https://leanprover.zulipchat.com/#narrow/stream/239415-metaprogramming-.2F.20tactics/topic/lemma.20distribution/near/212255452
 
 lemma real_big : (3000 : ℝ) + 2 > 50 := by norm_num
+lemma a :ℕ := 7
+lemma b :ℕ := a
 
 meta def expr.get_constants (e : expr) : name_set :=
 e.fold mk_name_set $ λ e' _ s, match e' with
@@ -55,7 +57,7 @@ let mathlib_pre := e.get_mathlib_dir,
   (name.from_components -- create the name from the suffix
     ((rest.popn_back 5 -- remove the `.lean` suffix
       ).split_on '/')).remove_default)
-meta def find_highest (tgt : name) : tactic name :=
+meta def find_highest (tgt : name) : tactic (name × option name) :=
 do
    trace "ok",
    d ← get_decl tgt,
@@ -76,14 +78,20 @@ do
   -- trace dag,
   trace fnames,
   trace $ dag.minimal_vertices fnames.to_list,
-  dag.meet dag.topological_sort dr fnames.to_list
+  o ← dag.meet dag.topological_sort dr fnames.to_list,
+  let of := import_to_file e.get_mathlib_dir o,
+  let m := (dat.deps.filter (λ n, e.decl_olean n = of)).argmax (λ dep, ((e.decl_pos dep).map pos.line).iget),
+  return (o, m)
   -- let cnsts := d.get_constants,
   -- cnsts.to_list.mfirst (λ nm,
   --   test_names_at (cnsts.erase nm) nm >>= guardb >> return nm) <|>
   -- fail "didn't find any highest decl"
   --  set_option pp.all true
   --  #check expr.const_name
+-- run_cmd trace $ (find_highest ``b)
+run_cmd trace $ (find_highest ``pell.xn)
 run_cmd trace $ (find_highest ``pell.n_lt_a_pow)
+
 meta def locate_decl (tgt : name) (posi : pos) : tactic unit :=
 do file ← find_highest tgt,
    trace file,
@@ -92,15 +100,19 @@ do file ← find_highest tgt,
   --  | none := "the current file"
   --  | some s := (module_info.of_module_id s).id
   --  end,
-   let tgtposi := (e.decl_pos file).iget,
-   let htm : html (unit) := h "a" [on_click (λ _, ()), attr.style [("cursor", "pointer")]] [(sformat!"{tgt} should be inserted in {file} after line {tgtposi.line}" : string)],
+   let tgtposi := ((file.2.bind e.decl_pos).map pos.line).iget + 1,
+   let htm : html (unit) := h "a" [on_click (λ _, ()), attr.style [("cursor", "pointer")]]
+    [(sformat!"{tgt} should be inserted in {file.fst} after line {tgtposi}" : string)],
    trace "oh",
-   trace $ import_to_file e.get_mathlib_dir file,
+   trace $ import_to_file e.get_mathlib_dir file.1,
    save_widget posi $
     component.ignore_action $
-    component.with_effects (λ _ x, [widget.effect.reveal_position (import_to_file e.get_mathlib_dir file) posi]) $
-    component.pure (λ _, [htm]),
-   trace!"{tgt} belongs in {file} after {file}" -- TODO
+    component.with_effects (λ _ x,
+      [widget.effect.reveal_position
+        (import_to_file e.get_mathlib_dir file.1) $
+        (file.2.bind e.decl_pos).get_or_else ⟨1, 0⟩]) $
+      component.pure (λ _, [htm])
+  --  trace!"{tgt} belongs in {file.1} after {file.1}" -- TODO
 run_cmd trace $ (locate_decl ``pell.n_lt_a_pow $ pos.mk 1 1)
 
 #check show_widget_cmd
@@ -113,9 +125,10 @@ meta def find_home_cmd (x : interactive.parse $ tk "#vind_home") : lean.parser u
   pure ()
 .
 
+#vind_home pell.xn
 #vind_home pell.n_lt_a_pow
 
--- end tactic
+end tactic
 
 
 -- def recfn : ℕ → ℕ
