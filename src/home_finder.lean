@@ -67,7 +67,13 @@ do
    let ftoi := mk_file_to_import' e,
   --  trace files,
   let global_fnames : rb_set name := e.get_decls.foldl (λ acc d, (((e.decl_olean d.to_name).bind ftoi).map acc.insert).get_or_else acc) mk_rb_set,
-  let fnames : rb_set name := files.foldl (λ acc n, ((ftoi n.id).map acc.insert).get_or_else acc) mk_rb_set,
+  let fnames : rb_set name :=
+    files.foldl (λ acc n,
+      ((ftoi n.id).map $ λ imn,
+        if ¬ (`init).is_prefix_of imn then
+          acc.insert imn
+        else
+          acc).get_or_else acc) mk_rb_set,
   --  trace fnames,
    dag ← unsafe_run_io $ get_import_dag e global_fnames.to_list,
   --  trace $ module_info.of_module_id "/",
@@ -75,7 +81,11 @@ do
   -- trace dag,
   trace fnames,
   trace $ dag.minimal_vertices fnames.to_list,
-  o ← dag.meet dag.topological_sort dr fnames.to_list,
+  let dt := dag.topological_sort,
+  o ← dag.meet dt dr fnames.to_list,
+  let o' := dag.all_meets fnames.to_list dt,
+  trace "all poss",
+  trace o',
   let of := import_to_file e.get_mathlib_dir o,
   let m := (dat.deps.filter (λ n, e.decl_olean n = of)).argmax (λ dep, ((e.decl_pos dep).map pos.line).iget),
   return (o, m)
@@ -87,6 +97,7 @@ do
   --  #check expr.const_name
 -- run_cmd trace $ (find_highest ``b)
 run_cmd trace $ (find_highest ``pell.xn)
+
 run_cmd trace $ (find_highest ``pell.n_lt_a_pow)
 
 meta def locate_decl (tgt : name) (posi : pos) : tactic unit :=
