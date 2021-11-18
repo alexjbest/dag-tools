@@ -268,6 +268,11 @@ def slice_up_to {α : Type*} (P : α → Prop) [decidable_pred P] : list α → 
 | (a :: l) := if P a then [a] else a :: slice_up_to l
 --#eval slice_up_to (∈ [1,2,4]) [5,5,612,4,12,1]
 
+meta def reverse {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)] [decidable_eq T]
+  (d : dag T) : dag T :=
+d.fold (dag.mk T) (λ v es (acc : dag T), es.foldl (λ (acc' : dag T) w, acc'.insert_edge w v) $ acc.insert_vertex v)
+-- #eval ((dag.mk ℕ).insert_edges [(1, 2), (2,3)]).reverse
+
 /-
 Is vertex w reachable from v in the dag d, given ts a topological sort of d.
 -/
@@ -293,12 +298,17 @@ S.foldl (λ (ol : bool) (w : T), ol && dreach.contains w) tt
 -- TODO this is hilariously inefficient
 --#eval ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5)]).is_reachable [] 3 3
 
-meta def meet [decidable_eq T] [has_to_string T] (d : dag T) (ts : list T) (dr : rb_map T (rb_set T)) (S : list T) : option T :=
--- trace (to_string ts)
+meta def meet [decidable_eq T] [has_to_string T] (d : dag T) (ts : list T) (dr : rb_map T (rb_set T) := d.reachable_table) (S : list T) : option T :=
 (slice_up_to (∈ S) ts).reverse.find (λ v, d.all_reachable dr v S)
 
+meta def all_meets [decidable_eq T] [has_to_string T] (d : dag T)
+(S : list T)
+(ts : list T := d.topological_sort) --(dr : rb_map T (rb_set T))
+: list T :=
+(d.reverse.minimal_vertices $ d.vertices.filter (λ v, d.all_reachable' ts v S)).to_list
+#eval ((dag.mk ℕ).insert_edges [(6, 2), (2,3), (2,1),(7,1),(7,3)]).all_meets [3,1]
+
 meta def meet' [decidable_eq T] [has_to_string T] (d : dag T) (S : list T) : T := let ts := d.topological_sort in
--- trace (to_string ts)
 ((slice_up_to (∈ S) ts).reverse.find (λ v, d.all_reachable' ts v S)).iget
 
 --#eval ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5),(7,1),(7,3)]).meet [3,1]
@@ -312,11 +322,6 @@ rb_set.of_list $ (d.minimal_vertices_with_components start).snd.map (λ S, d.mee
   -- (rb_set.of_list [4,7])
 --#eval ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5),(7,1),(7,3), (6,8)]).meet [8]
 --#eval ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5),(7,1),(7,3), (6,8)]).reachable 8
-
-meta def reverse {T : Type*} [has_lt T] [decidable_rel ((<) : T → T → Prop)] [decidable_eq T]
-  (d : dag T) : dag T :=
-d.fold (dag.mk T) (λ v es (acc : dag T), es.foldl (λ (acc' : dag T) w, acc'.insert_edge w v) $ acc.insert_vertex v)
--- #eval ((dag.mk ℕ).insert_edges [(1, 2), (2,3)]).reverse
 
 -- TODO we probably don't actually need to reverse here?
 /-- Compute the total number of ancestors descendent pairs in a dag, excluding self -/

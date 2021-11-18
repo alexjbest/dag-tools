@@ -11,6 +11,7 @@ import crawler
 -- import init.meta.widget.tactic_component
 -- import data.list.lex
 
+-- TODO replace igets with get or else for surity
 /-!
 Notes:
 
@@ -491,9 +492,6 @@ meta def optimize_imports (e : environment) (nam : name) (G : dag name) (Gr := G
   --  G.count_descendents (old_imp : list name),
    G.count_descendents (new_imp.keys : list name))
 
-meta instance : is_total name ((<) : name → name → Prop) := sorry
-meta instance oof : is_trans name ((<) : name → name → Prop) := sorry
-meta instance asdsa : is_antisymm name ((<) : name → name → Prop) := sorry
 /-- Convert the output of `optimize_imports` into a sed script for removing these imports. Note:
   * This clobbers import comments
   * Mac users should replace `sed` with `gsed` (via homebrew) in the script to ensure it works
@@ -503,15 +501,15 @@ meta instance asdsa : is_antisymm name ((<) : name → name → Prop) := sorry
   but it just feels weird to have this function meta.
 -/
 meta def output_to_sed [decidable_eq name] -- TODO remove numbers
- (o : name × rb_set name × rb_set name × ℕ × ℕ) : string :=
-let ⟨na, ol, ne, oli, nei⟩ := o,
+ (o : name × rb_set name × rb_set name × rb_set name × ℕ × ℕ) : string :=
+let ⟨na, ol, ne, dif, oli, nei⟩ := o,
     fn := na.to_string_with_sep "/",
     -- https://unix.stackexchange.com/questions/342516/sed-remove-all-matches-in-the-file-and-insert-some-lines-where-the-first-match
     ne2 := ne.to_list,
     ol2 := ol.to_list,
     imps := "\\\n".intercalate $ (ne2.map (λ i, sformat!"import {i}")).qsort (λ a b, a <  b) in
 if ne2 ≠ ol2 then
-sformat!"# {oli} → {nei} {ol2}\n" ++
+sformat!"# {oli} → {nei} {ol2}, removed {dif.to_list}\n" ++
 -- (if oli = nei then "# only transitive imports removed\n" else "") ++
 "sed '/^import /{x;//!c\\" ++ sformat!"
 {imps}

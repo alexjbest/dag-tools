@@ -1,13 +1,12 @@
 import import_optimizer
 import all
-
 open dag
 open interaction_monad
 open io io.fs native tactic
 meta def main : io unit :=
 do
   e ← run_tactic get_env,
-  G ← get_import_dag e [`all],
+  G ← get_import_dag e [`data.int.basic],
   print_ln G.keys,
   let Gr := G.reachable_table,
   print_ln sformat!"running on {G.keys.length} files",
@@ -53,13 +52,16 @@ do
                 T.2.2 ≠ 0 -- Any file that ends up with no imports is surely a default-style
                                 -- special case, e.g. `tactic.basic` so we ignore it
               then -- update the deps
-                return $ some (⟨T.1, rb_set.of_list (G.find na), rb_set.of_list $ (T.2.1 ∪ G.find na).filter
+                return $ some (⟨T.1, rb_set.of_list (G.find na),
+                  rb_set.of_list $ (T.2.1 ∪ G.find na).filter $
                   -- TODO this should probably be an actual function
-                   $ λ imp, T.2.1.foldl (λ acc min, acc || (re.ifind min).contains imp) ff = tt,
-                  G.count_descendents $ G.find na, T.2.2⟩ : name × rb_set name × rb_set name × ℕ × ℕ)
+                    λ imp, T.2.1.foldl (λ acc min, acc || (re.ifind min).contains imp) ff = tt,
+                  (Gr.find na).iget.sdiff (T.2.1.foldl (λ acc' v, acc'.union $ (re.find v).iget) mk_rb_set),
+                  G.count_descendents $ G.find na,
+                  T.2.2⟩ : name × rb_set name × rb_set name × rb_set name × ℕ × ℕ)
               else -- don't update the deps
-                let old_imp := (G.find na) in
-                return $ some (⟨T.1, rb_set.of_list old_imp, rb_set.of_list old_imp, G.count_descendents old_imp, G.count_descendents old_imp⟩ : name × rb_set name × rb_set name × ℕ × ℕ)
+                let old_imp := G.find na in
+                return $ some (⟨T.1, rb_set.of_list old_imp, rb_set.of_list old_imp, rb_set.of_list [], G.count_descendents old_imp, G.count_descendents old_imp⟩ : name × rb_set name × rb_set name × rb_set name × ℕ × ℕ)
               ) <|> return none)
           s
         with
@@ -77,7 +79,7 @@ do
       else
 
         acc.1, -- old version
-     acc.2 ++ outs.map (option.map output_to_sed)).map option.iget) -- put all the outputs together
+     acc.2 ++ (outs.map (option.map output_to_sed)).map option.iget)) -- put all the outputs together
     (G, []),
   -- print_ln $ to_fmt G,
   -- print_ln $ to_fmt res.fst,
