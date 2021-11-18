@@ -100,6 +100,7 @@ do file ← find_highest tgt,
    let tgtposi := ((file.2.bind e.decl_pos).map pos.line).iget + 1,
    let htm : html (unit) := h "p" [] [h "a"
      [on_click (λ _, ()), attr.style [("cursor", "pointer")]]
+     -- TODO link to decl here too perhaps
      [h "tt" [] [tgt], (sformat!" can be inserted in " : string),
       h "tt" [] [file.fst], (sformat!" after line {tgtposi}" : string)]],
    save_widget posi $
