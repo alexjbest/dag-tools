@@ -366,7 +366,10 @@ let G := mk_file_dag_of_file_data fdata,
 
 /-- parse a files imports by reading the first few lines of the file.
   Note this function is quite brittle, some examples of things that probably break it but are valid
-  lean.
+  lean. Most of these are banned / not done in mathlib though
+
+  TODO handle relative imports, e.g. `import .blah` this is done once in mathlib (in tests), or
+    remove from mathlib
 ```
   /-hi-/ import tactic
   import algebra.add_torsor

@@ -87,3 +87,26 @@ do
 
 -- set_option profiler true
 -- run_cmd unsafe_run_io main
+
+
+run_cmd unsafe_run_io (do
+  e ← run_tactic get_env,
+  let L := [`all],
+-- --   -- let L := [`data.list.defs],
+-- --   let L := [`tactic.basic],
+-- --   -- let L := [`linear_algebra.affine_space.basic],
+-- --   -- let L := [`linear_algebra.matrix.determinant],
+--   let L := [`algebra.char_p.invertible],
+  -- fdata ← run_tactic $ get_file_data e L.head,
+--   print_ln fdata,
+  G ← get_import_dag e L,
+  -- print_ln $ to_string G.size,
+--   -- print_ln $ to_fmt $ G.find `algebra.char_p.invertible,
+  let Gr := G.reachable_table,
+  -- let T := L.map (λ nam, optimize_imports e nam G Gr fdata),
+  -- print_ln $ to_fmt $ (G.reverse.reachable_table.find `linear_algebra.tensor_product).map (rb_set.size)
+  let na := G.reverse.reachable_table.fold (mk_rb_map : rb_counter name) (λ v es acc, acc.insert v es.size),
+  print_ln $ G.vertices.foldl (λ acc v, acc + na.zfind v - 1) 0)
+
+--   print_ln $ to_string T
+--   )

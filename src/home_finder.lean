@@ -5,9 +5,6 @@ import import_optimizer
 -- https://leanprover.zulipchat.com/#narrow/stream/239415-metaprogramming-.2F.20tactics/topic/lemma.20distribution/near/212269963
 -- see also https://leanprover.zulipchat.com/#narrow/stream/239415-metaprogramming-.2F.20tactics/topic/lemma.20distribution/near/212255452
 
-lemma real_big : (3000 : ℝ) + 2 > 50 := by norm_num
-lemma a :ℕ := 7
-lemma b :ℕ := a
 
 meta def expr.get_constants (e : expr) : name_set :=
 e.fold mk_name_set $ λ e' _ s, match e' with
@@ -57,7 +54,11 @@ let mathlib_pre := e.get_mathlib_dir,
   (name.from_components -- create the name from the suffix
     ((rest.popn_back 5 -- remove the `.lean` suffix
       ).split_on '/')).remove_default)
-meta def find_highest (tgt : name) : tactic (name × option name) :=
+
+meta def get_others (d : dag name) (tgt : name) (mins : list name) : rb_set name :=
+(mins.foldl (λ acc v, (d.all_paths tgt v).foldl (λ acc2 v2, acc2.insert_list v2) acc) mk_rb_set : rb_set name).erase tgt
+
+meta def find_poss (tgt : name) : tactic (name × option name × list name) :=
 do
    d ← get_decl tgt,
    e ← get_env,
@@ -79,16 +80,16 @@ do
   --  trace $ module_info.of_module_id "/",
   let dr := dag.reachable_table,
   -- trace dag,
-  trace fnames,
-  trace $ dag.minimal_vertices fnames.to_list,
+  -- trace fnames,
+  -- trace $ dag.minimal_vertices fnames.to_list,
   let dt := dag.topological_sort,
   o ← dag.meet dt dr fnames.to_list,
   let o' := dag.all_meets fnames.to_list dt,
-  trace "all poss",
-  trace o',
+  -- trace "all poss",
+  -- trace o',
   let of := import_to_file e.get_mathlib_dir o,
   let m := (dat.deps.filter (λ n, e.decl_olean n = of)).argmax (λ dep, ((e.decl_pos dep).map pos.line).iget),
-  return (o, m)
+  return (o, m, (get_others dag ((e.decl_olean tgt).bind ftoi).iget o').to_list)
   -- let cnsts := d.get_constants,
   -- cnsts.to_list.mfirst (λ nm,
   --   test_names_at (cnsts.erase nm) nm >>= guardb >> return nm) <|>
@@ -96,35 +97,47 @@ do
   --  set_option pp.all true
   --  #check expr.const_name
 -- run_cmd trace $ (find_highest ``b)
-run_cmd trace $ (find_highest ``pell.xn)
+-- run_cmd trace $ (find_highest ``pell.xn)
 
-run_cmd trace $ (find_highest ``pell.n_lt_a_pow)
+-- run_cmd trace $ (find_highest ``pell.n_lt_a_pow)
+
+
+
 
 meta def locate_decl (tgt : name) (posi : pos) : tactic unit :=
-do file ← find_highest tgt,
-   trace file,
+do file ← find_poss tgt,
+  --  trace file,
    e ← get_env,
   --  let file := match e.decl_olean highest with
   --  | none := "the current file"
   --  | some s := (module_info.of_module_id s).id
   --  end,
-   let tgtposi := ((file.2.bind e.decl_pos).map pos.line).iget + 1,
-   let htm : html (unit) := h "p" [] [h "a"
-     [on_click (λ _, ()), attr.style [("cursor", "pointer")]]
+   let tgtposi := ((file.2.1.bind e.decl_pos).map pos.line).iget + 1,
+  trace tgtposi,
+   let htm : html (name × option pos) := h "p" [] ([h "a"
+      [on_click (λ _, (file.fst, file.2.1.bind e.decl_pos)), attr.style [("cursor", "pointer")]]
      -- TODO link to decl here too perhaps
-     [h "tt" [] [tgt], (sformat!" can be inserted in " : string),
-      h "tt" [] [file.fst], (sformat!" after line {tgtposi}" : string)]],
+      [h "tt" [] [tgt], (sformat!" can be inserted in " : string),
+        h "tt" [] [file.fst], (sformat!" after line {tgtposi}" : string)]] ++
+        if file.2.2 ≠ [] then
+          [h "p" [] (["or in one of:"] ++
+            file.2.2.map (λ na, h "p" [] [h "a"
+              [on_click (λ _, ⟨na, none⟩), attr.style [("cursor", "pointer")]]
+              [na]]))]
+      else
+      []),
    save_widget posi $
     component.ignore_action $
-    component.with_effects (λ _ x,
+    component.with_effects (λ _ (x : name × option pos),
       [widget.effect.reveal_position
-        (import_to_file e.get_mathlib_dir file.1) $
-        (file.2.bind e.decl_pos).get_or_else ⟨1, 0⟩]) $
+        (import_to_file e.get_mathlib_dir x.fst) $
+        x.snd.get_or_else ⟨1, 0⟩]) $
       component.pure (λ _, [htm])
-  --  trace!"{tgt} belongs in {file.1} after {file.1}" -- TODO
-run_cmd trace $ (locate_decl ``pell.n_lt_a_pow $ pos.mk 1 1)
 
-#check show_widget_cmd
+  --  trace!"{tgt} belongs in {file.1} after {file.1}" -- TODO
+-- run_cmd trace $ (locate_decl ``pell.n_lt_a_pow $ pos.mk 1 1)
+
+-- #check show_widget_cmd
 reserve notation `#vind_home` -- TODO mve
 @[user_command]
 meta def find_home_cmd (x : interactive.parse $ tk "#vind_home") : lean.parser unit := do
@@ -134,14 +147,5 @@ meta def find_home_cmd (x : interactive.parse $ tk "#vind_home") : lean.parser u
   pure ()
 .
 
-#vind_home pell.xn
-#vind_home pell.n_lt_a_pow
 
 end tactic
-
-
-def recfn : ℕ → ℕ
-| 0 := 0
-| (n+1) := n
-
-#vind_home recfn
