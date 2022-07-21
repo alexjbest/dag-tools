@@ -6,7 +6,8 @@ open io io.fs native tactic
 meta def main : io unit :=
 do
   e ← run_tactic get_env,
-  G ← get_import_dag e [`data.int.basic],
+  let proj_dir := e.get_project_dir `thm94 11,
+  G ← get_import_dag e [`challenge] proj_dir,
   print_ln G.keys,
   let Gr := G.reachable_table,
   print_ln sformat!"running on {G.keys.length} files",
@@ -39,13 +40,13 @@ do
           (unsafe_run_io $ do
           print_ln na,
             b ← is_default e na, -- we skip default files
-            b2 ← file_is_in_mathlib e na, -- we only work on mathlib itself (TODO allow other projects)
+            b2 ← file_is_in_project na proj_dir, -- we only work on mathlib itself (TODO allow other projects)
             guardb (b2 ∧ ¬ b) >>
             (do
-              fdata ← run_tactic $ get_file_data e na,
+              fdata ← run_tactic $ get_file_data e na proj_dir,
 
-              let T := optimize_imports e na acc.1 re $
-  rb_map.of_list $ fdata.map (λ t, (t.decl_name, t))
+              let T := optimize_imports e na acc.1 re (
+                rb_map.of_list $ fdata.map (λ t, (t.decl_name, t))) proj_dir
               , -- fdatas.ifind na,
               -- the original imports in the source files
               if -- (¬ tt) ∨ -- robust mode
@@ -62,7 +63,7 @@ do
               else -- don't update the deps
                 let old_imp := G.find na in
                 return $ some (⟨T.1, rb_set.of_list old_imp, rb_set.of_list old_imp, rb_set.of_list [], G.count_descendents old_imp, G.count_descendents old_imp⟩ : name × rb_set name × rb_set name × rb_set name × ℕ × ℕ)
-              ) <|> return none)
+              ) <|> (print_ln "skipping" >> return none))
           s
         with
           | result.success w _ := w
@@ -70,7 +71,7 @@ do
             trace ("File splitter failed:\n" ++ msg.elim "(no message)" (λ msg, to_string $ msg ()))
             none
        end)
-       1 -- chunk size
+       3 -- chunk size
     in (if tt then
         (outs.filter $
           λ op, option.is_some op = tt).foldl
@@ -91,15 +92,16 @@ do
 
 run_cmd unsafe_run_io (do
   e ← run_tactic get_env,
-  let L := [`all],
+  let proj_dir := e.get_project_dir `thm94 11,
+  let L := [`challenge],
 -- --   -- let L := [`data.list.defs],
 -- --   let L := [`tactic.basic],
 -- --   -- let L := [`linear_algebra.affine_space.basic],
 -- --   -- let L := [`linear_algebra.matrix.determinant],
 --   let L := [`algebra.char_p.invertible],
-  -- fdata ← run_tactic $ get_file_data e L.head,
+  -- fdata ← run_tactic $ get_file_data e L.head proj_dir,
 --   print_ln fdata,
-  G ← get_import_dag e L,
+  G ← get_import_dag e L proj_dir,
   -- print_ln $ to_string G.size,
 --   -- print_ln $ to_fmt $ G.find `algebra.char_p.invertible,
   let Gr := G.reachable_table,

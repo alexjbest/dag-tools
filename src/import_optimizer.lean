@@ -215,9 +215,9 @@ let na := decl.to_name,
 --  id)
 -- | [] := pure []
 /-- Creates an import data tuple for every declaration in file `fname`. -/
-meta def get_file_data (env : environment) (fname : name) :
+meta def get_file_data (env : environment) (fname : name) (proj_dir : string := env.get_mathlib_dir) :
   tactic $ list import_data :=
-let fn_string := import_to_file env.get_mathlib_dir fname in
+let fn_string := import_to_file proj_dir fname in
 -- aa env fname file_to_import env.get_decls
 -- (λ decls : list declaration, do d ← decls,
 --   guardb (env.decl_olean d.to_name = fn_string) >>
@@ -399,11 +399,14 @@ do
       else
         get_imports_aux f b)
 
-meta def get_imports (e : environment) (file : name) : io (list name) :=
+meta def get_imports (e : environment) (file : name) (project_dir : string := e.get_mathlib_dir) :
+  io (list name) :=
 do
   -- get the file handle by trying a bunch of possibilities in order
   f ← mk_file_handle (import_to_file e.get_mathlib_dir file) io.mode.read <|>
       mk_file_handle (import_to_file e.get_mathlib_dir $ file.append `default) io.mode.read <|>
+      mk_file_handle (import_to_file project_dir file) io.mode.read <|>
+      mk_file_handle (import_to_file project_dir $ file.append `default) io.mode.read <|>
       mk_file_handle (import_to_file e.get_core_dir file) io.mode.read <|>
       mk_file_handle (import_to_file e.get_core_dir $ file.append `default) io.mode.read,
   l ← get_imports_aux f ff,
@@ -427,22 +430,34 @@ do
 meta def file_is_in_mathlib (e : environment) (file : name) : io bool :=
 do
   b ← file_exists $ import_to_file e.get_mathlib_dir $ file,
-  bd ← file_exists $ import_to_file e.get_mathlib_dir $ file.append `default,
-  return $ b ∨ bd
+  if b then return tt else do
+    bd ← file_exists $ import_to_file e.get_mathlib_dir $ file.append `default,
+    return $ bd
+
+/-- Checks whether the file whose import name is `file` is in the project directory.
+    Compare `environment.is_in_mathlib` which checks if a declaration is in mathlib. -/
+meta def file_is_in_project (file : name) (project_dir : string) : io bool :=
+do
+  b ← file_exists $ import_to_file project_dir $ file,
+  if b then return tt else do
+  bd ← file_exists $ import_to_file project_dir $ file.append `default,
+  return $ bd
 
 /-- Auxiliary function to make the import dag. -/
-meta def get_dag_aux (e : environment) : name → dag name → io (dag name)
+meta def get_dag_aux (e : environment) (project_dir : string) :
+  name → dag name → io (dag name)
 | n d := do
 if d.contains n then return d else do
-  l ← get_imports e n,
+  l ← get_imports e n project_dir,
   l.mfoldl (λ od im, do
     G ← get_dag_aux im od,
     return $ G.insert_edge n im) d
 
 /-- get a dag of all imports between files with edges from later dependencies to earlier.
    the environment is used to find the location of files, to parse their imports -/
-meta def get_import_dag (e : environment) (files : list name) : io (dag name) :=
-files.mfoldl (λ ol file, get_dag_aux e file ol) (dag.mk _)
+meta def get_import_dag (e : environment) (files : list name) (project_dir : string := e.get_mathlib_dir) :
+  io (dag name) :=
+files.mfoldl (λ ol file, get_dag_aux e project_dir file ol) (dag.mk _)
 
 open native
 -- TODO we should probably not pass this function around anymore
@@ -451,21 +466,23 @@ open native
     We remove `default` by default.
     E.g. this will send
     `/users/alex/mathlib/src/group_theory/subgroup/default.lean` to `group_theory.subgroup`. -/
-meta def mk_file_to_import (e : environment) : string → name :=
+meta def mk_file_to_import (e : environment) (proj_pre : string := "this will never be a prefix") :
+  string → name :=
 let mathlib_pre := e.get_mathlib_dir,
     core_pre := e.get_core_dir in
 λ file,
   let rest := (file.get_rest mathlib_pre).get_or_else $ -- take off the mathlib or core prefix
-              (file.get_rest core_pre).get_or_else
+              (file.get_rest proj_pre).get_or_else $
+              (file.get_rest core_pre).get_or_else $
               sformat!"Hello, I'm {file} trapped in an error string, please let me out" in
   (name.from_components -- create the name from the suffix
     ((rest.popn_back 5 -- remove the `.lean` suffix
       ).split_on '/')).remove_default
 
 meta def mk_file_dep_counts (env : environment) (fname : name) (Gr : rb_map name (rb_set name))
-  (fdata : rb_map name import_data) :
+  (fdata : rb_map name import_data) (proj_pre : string := "this will never be a prefix") :
   rb_counter name :=
-let file_to_import := mk_file_to_import env,
+let file_to_import := mk_file_to_import env proj_pre,
     dcb := mk_file_dep_counts_basic env fname file_to_import fdata,
     -- now we copy accross only those deps which were transitive imports of the original, to prevent
     -- spurious deps being added
@@ -476,9 +493,9 @@ let file_to_import := mk_file_to_import env,
   -- return $ (Gr.fold dc (λ na ln odc, ln.fold odc (λ de odc', odc'.incr_by de ((dc.find na).get_or_else 0)))).erase fname
 
 meta def get_minimal_imports (e : environment) (n : name) (G : dag name) (Gr : rb_map name (rb_set name))
-  (fdata : rb_map name import_data) (robust : bool := tt) :
+  (fdata : rb_map name import_data) (proj_pre : string := "this will never be a prefix") (robust : bool := tt) :
   rb_set name :=
-  let b := mk_file_dep_counts e n Gr fdata in
+  let b := mk_file_dep_counts e n Gr fdata proj_pre in
   G.minimal_vertices $
     (b.keys.filter (λ k, b.find k ≠ some 0)).union $ -- the needed imports
       ((Gr.find n).iget).to_list.filter
@@ -487,9 +504,9 @@ meta def get_minimal_imports (e : environment) (n : name) (G : dag name) (Gr : r
         (λ dn, robust ∧ dn ≠ n ∧ ((`tactic).is_prefix_of dn ∨ dn = `data.rbtree.default_lt))
 
 meta def optimize_imports (e : environment) (nam : name) (G : dag name) (Gr := G.reachable_table)
-  (fdata : rb_map name import_data) :
+  (fdata : rb_map name import_data) (proj_pre : string := "this will never be a prefix") :
   name × list name × ℕ :=
-  let new_imp := get_minimal_imports e nam G Gr fdata in
+  let new_imp := get_minimal_imports e nam G Gr fdata proj_pre in
   (nam,
   --  old_imp.qsort (λ a b, a.to_string < b.to_string : name → name → bool),
    new_imp.to_list,
@@ -517,7 +534,7 @@ sformat!"# {oli} → {nei} {ol2}, removed {dif.to_list}\n" ++
 -- (if oli = nei then "# only transitive imports removed\n" else "") ++
 "sed '/^import /{x;//!c\\
 " ++ sformat!"{imps}
-" ++ " d}' src/{fn}.lean\n"
+" ++ "d}' " ++ sformat!"src/{fn}.lean\n"
 else ""
 
 -- set_option profiler true
