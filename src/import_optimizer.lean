@@ -1,6 +1,7 @@
 import dag
 import tactic
 import crawler
+import data.list.defs
 -- import data.int.basic
 -- import number_theory.quadratic_reciprocity
 -- import topology.algebra.module
@@ -198,7 +199,7 @@ let na := decl.to_name,
       file_name := fname,
       file_pos := po,
       deps := -- dont even consider quot and friends
-        (list_items decl.type ++ list_items decl.value ++ attrd).erase_dup.diff magic_homeless_decls, }) <$>
+        (list_items decl.type ++ list_items decl.value ++ attrd).dedup.diff magic_homeless_decls, }) <$>
   get_attr_deps na
 
 -- #eval (λ inp : list nat, do l ← inp, guardb (l = 1), pure l) [1,2]
@@ -239,7 +240,7 @@ let fn_string := import_to_file env.get_mathlib_dir fname in
 --     { decl_name := na,
 --       file_name := fname,
 --       file_pos := po,
---       deps := (list_items decl.type ++ list_items decl.value ++ attrd).erase_dup, }) <$>
+--       deps := (list_items decl.type ++ list_items decl.value ++ attrd).dedup, }) <$>
 --   get_attr_deps env na
 
 -- /-- Creates an import data tuple for every declaration in file `fname`. -/
@@ -514,9 +515,9 @@ let ⟨na, ol, ne, dif, oli, nei⟩ := o,
 if ne2 ≠ ol2 then
 sformat!"# {oli} → {nei} {ol2}, removed {dif.to_list}\n" ++
 -- (if oli = nei then "# only transitive imports removed\n" else "") ++
-"sed '/^import /{x;//!c\\" ++ sformat!"
-{imps}
-d}' src/{fn}.lean\n"
+"sed '/^import /{x;//!c\\
+" ++ sformat!"{imps}
+" ++ " d}' src/{fn}.lean\n"
 else ""
 
 -- set_option profiler true

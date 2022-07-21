@@ -314,7 +314,7 @@ meta def meet' [decidable_eq T] [has_to_string T] (d : dag T) (S : list T) : T :
 --#eval ((dag.mk ℕ).insert_edges [(1, 5), (3, 2), (4,5), (2,5),(7,1),(7,3)]).meet [3,1]
 meta def meets_of_components [decidable_eq T] [has_to_string T] (d : dag T) (ts : list T) (dr : rb_map T (rb_set T)) (start : native.rb_set T) :
   native.rb_set T :=
-rb_set.of_list $ (d.minimal_vertices_with_components start).snd.map (λ S, d.meet ts dr S)
+rb_set.of_list $ (d.minimal_vertices_with_components start).snd.map (λ S, (d.meet ts dr S).iget) -- TODO check
 meta def meets_of_components' [decidable_eq T] [has_to_string T] (d : dag T) (start : native.rb_set T) :
   native.rb_set T :=
 rb_set.of_list $ (d.minimal_vertices_with_components start).snd.map (λ S, d.meet' S)
