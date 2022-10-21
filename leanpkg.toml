@@ -1,8 +1,8 @@
 [package]
-name = "johan"
+name = "dag-tools"
 version = "0.1"
-lean_version = "leanprover-community/lean:3.45.0"
+lean_version = "leanprover-community/lean:3.48.0"
 path = "src"
 
 [dependencies]
-mathlib = {git = "https://github.com/leanprover-community/mathlib", rev = "b5e9ffd25fba7e7aeea3284c6d544ddacfd654e6"}
+mathlib = {git = "https://github.com/leanprover-community/mathlib", rev = "24586ea01967e338725e0af1d47df209bb2f145f"}
